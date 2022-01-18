@@ -1,0 +1,18 @@
+[package]
+name = "two-party-musig2-eddsa"
+description = "Two-party EdDSA signatures based on Musig2."
+version = "0.1.0"
+edition = "2021"
+authors = [
+    "Shalev Keren <shalev@zengo.com>"
+]
+exclude = [".gitignore"]
+
+[dependencies]
+curve25519-dalek = "3"
+rand = "0.8"
+sha2 = "0.10"
+
+[dev-dependencies]
+ed25519-dalek = "1"
+rand_xoshiro = "0.6.0"
