@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use curve25519_dalek::constants;
 use curve25519_dalek::edwards::EdwardsPoint;
 use curve25519_dalek::scalar::Scalar;
@@ -5,6 +6,7 @@ use rand::{thread_rng, Rng};
 use sha2::digest::Update;
 use sha2::{Digest, Sha512};
 
+pub const NUMBER_OF_NONCES: usize = 2;
 #[derive(Clone, Debug)]
 pub struct ExpandedPrivateKey {
     pub prefix: [u8; 32],
@@ -44,10 +46,58 @@ impl ExpandedKeyPair {
     }
 }
 
-pub fn aggregate_public_key(
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrivatePartialNonces {
+    pub r: [Scalar; NUMBER_OF_NONCES],
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PublicPartialNonces {
+    pub R: [EdwardsPoint; NUMBER_OF_NONCES],
+}
+
+pub fn generate_partial_nonces(
+    keys: &ExpandedKeyPair,
+    message: Option<&[u8]>,
+) -> (PrivatePartialNonces, PublicPartialNonces) {
+    let mut rng = rand::thread_rng();
+    generate_partial_nonces_internal(keys, message, &mut rng)
+}
+
+fn generate_partial_nonces_internal(
+    keys: &ExpandedKeyPair,
+    message: Option<&[u8]>,
+    rng: &mut impl Rng,
+) -> (PrivatePartialNonces, PublicPartialNonces) {
+    // here we deviate from the spec, by introducing  non-deterministic element (random number)
+    // to the nonce, this is important for MPC implementations
+    let r: [Scalar; NUMBER_OF_NONCES] = [(); NUMBER_OF_NONCES].map(|_| {
+        let mut result_as_array = [0u8; 64];
+        let mut hash_result = &Sha512::new()
+            .chain("musig2 private nonce generation")
+            .chain(&keys.expanded_private_key.prefix)
+            .chain(message.unwrap_or(&[]))
+            .chain(rng.gen::<[u8; 32]>())
+            .finalize();
+        result_as_array.copy_from_slice(hash_result);
+        Scalar::from_bytes_mod_order_wide(&result_as_array)
+    });
+    let R: [EdwardsPoint; NUMBER_OF_NONCES] = r
+        .clone()
+        .map(|scalar| &scalar * &constants::ED25519_BASEPOINT_TABLE);
+    (PrivatePartialNonces { r }, PublicPartialNonces { R })
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AggPublicKeyAndMusigCoeff {
+    pub agg_public_key: EdwardsPoint,
+    pub musig_coefficient: Scalar,
+}
+
+pub fn aggregate_public_keys(
     my_public_key: &EdwardsPoint,
     other_public_key: &EdwardsPoint,
-) -> Option<(EdwardsPoint, Scalar)> {
+) -> Option<AggPublicKeyAndMusigCoeff> {
     // keys should never be equal since we want the server and client to have different shares of the private key.
     if my_public_key == other_public_key {
         return None;
@@ -74,16 +124,122 @@ pub fn aggregate_public_key(
     result_as_array.copy_from_slice(hash_result);
     let first_musig_coefficient = Scalar::from_bytes_mod_order_wide(&result_as_array);
     let agg_public_key = first_musig_coefficient * first_pub_key + second_pub_key;
-    if second_pub_key == my_public_key {
+    if first_pub_key == my_public_key {
         my_musig_coefficient = first_musig_coefficient;
     }
 
-    Some((agg_public_key, my_musig_coefficient))
+    Some(AggPublicKeyAndMusigCoeff {
+        agg_public_key,
+        musig_coefficient: my_musig_coefficient,
+    })
+}
+
+// EdDSA Signature
+#[derive(Clone, PartialEq, Debug)]
+pub struct Signature {
+    pub R: EdwardsPoint,
+    pub s: Scalar,
+}
+
+impl Signature {
+    pub fn verify(&self, message: &[u8], public_key: &EdwardsPoint) -> Result<(), &'static str> {
+        let k = Self::k(&self.R, public_key, message);
+        let A = public_key;
+
+        let kA = A * k;
+        let R_plus_kA = &kA + &self.R;
+        let sG = &self.s * &constants::ED25519_BASEPOINT_TABLE;
+
+        if R_plus_kA == sG {
+            Ok(())
+        } else {
+            Err("EdDSA Signature verification failed")
+        }
+    }
+
+    pub(crate) fn k(R: &EdwardsPoint, PK: &EdwardsPoint, message: &[u8]) -> Scalar {
+        let mut result_as_array = [0u8; 64];
+        let hash_result = &Sha512::new()
+            .chain(R.compress().as_bytes())
+            .chain(PK.compress().as_bytes())
+            .chain(message)
+            .finalize();
+        result_as_array.copy_from_slice(hash_result);
+        Scalar::from_bytes_mod_order_wide(&result_as_array)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PartialSignature {
+    pub R: EdwardsPoint,
+    pub my_partial_s: Scalar,
+}
+
+pub fn partial_sign(
+    other_public_partial_nonces: &PublicPartialNonces,
+    my_public_partial_nonces: &PublicPartialNonces,
+    my_private_partial_nonces: &PrivatePartialNonces,
+    agg_public_key: &AggPublicKeyAndMusigCoeff,
+    my_keypair: &ExpandedKeyPair,
+    message: &[u8],
+) -> PartialSignature {
+    // Sum up the partial nonces from both parties index-wise, meaning,  R[i]
+    // is the sum of partial_nonces[i] from both parties
+    // NOTE: the number of nonces is v = 2 here!
+    let sum_R = [
+        my_public_partial_nonces.R[0] + other_public_partial_nonces.R[0],
+        my_public_partial_nonces.R[1] + other_public_partial_nonces.R[1],
+    ];
+
+    // Compute b as hash of nonces
+    let mut result_as_array = [0u8; 64];
+    let hash_result = &Sha512::new()
+        .chain("musig2 aggregated nonce generation")
+        .chain(agg_public_key.agg_public_key.compress().as_bytes())
+        .chain(sum_R[0].compress().as_bytes())
+        .chain(sum_R[1].compress().as_bytes())
+        .chain(message)
+        .finalize();
+    result_as_array.copy_from_slice(hash_result);
+    let b = Scalar::from_bytes_mod_order_wide(&result_as_array);
+
+    // Compute effective nonce
+    // The idea is to compute R and r s.t. R = R_0 + b•R_1 and r = r_0 + b•r_1
+    let effective_R = sum_R[0] + b * sum_R[1];
+    let effective_r = my_private_partial_nonces.r[0] + b * my_private_partial_nonces.r[1];
+
+    // Compute Fiat-Shamir challenge of signature
+    let sig_challenge = Signature::k(&effective_R, &agg_public_key.agg_public_key, message);
+
+    let partial_signature = sig_challenge
+        * agg_public_key.musig_coefficient
+        * my_keypair.expanded_private_key.private_key
+        + effective_r;
+    PartialSignature {
+        R: effective_R,
+        my_partial_s: partial_signature,
+    }
+}
+
+pub fn aggregate_partial_signatures(
+    my_partial_sig: &PartialSignature,
+    other_partial_s: &Scalar,
+) -> Signature {
+    Signature {
+        R: my_partial_sig.R.clone(),
+        s: my_partial_sig.my_partial_s * other_partial_s,
+    }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::protocol::ExpandedKeyPair;
+    use crate::protocol::{
+        aggregate_partial_signatures, aggregate_public_keys, generate_partial_nonces_internal,
+        partial_sign,
+    };
+    use curve25519_dalek::scalar::Scalar;
+    use hex::decode;
     use rand::{thread_rng, Rng};
     use rand_xoshiro::rand_core::{RngCore, SeedableRng};
     use rand_xoshiro::Xoshiro256PlusPlus;
@@ -114,5 +270,99 @@ pub(crate) mod tests {
 
             assert_eq!(zengo_pub_serialized, &dalek_pub_serialized);
         }
+    }
+
+    #[test]
+    fn test_ed25519_generate_keypair_from_seed() {
+        let priv_str = "48ab347b2846f96b7bcd00bf985c52b83b92415c5c914bc1f3b09e186cf2b14f"; // Private Key
+        let priv_dec: [u8; 32] = decode(priv_str).unwrap().try_into().unwrap();
+
+        let expected_pubkey_hex =
+            "c7d17a93f129527bf7ca413f34a0f23c8462a9c3a3edd4f04550a43cdd60b27a";
+        let expected_pubkey: [u8; 32] = decode(expected_pubkey_hex).unwrap().try_into().unwrap();
+
+        let keypair = ExpandedKeyPair::create_from_private_key(priv_dec);
+        let pubkey = keypair.public_key;
+        assert_eq!(
+            pubkey.compress().as_bytes(),
+            &expected_pubkey,
+            "Public keys do not match!"
+        );
+    }
+
+    #[test]
+    fn test_multiparty_signing_for_two_parties() {
+        let mut rng = deterministic_fast_rand("test_multiparty_signing_for_two_parties", None);
+        for _i in 0..3 {
+            test_multiparty_signing_for_two_parties_internal(&mut rng);
+        }
+    }
+
+    fn test_multiparty_signing_for_two_parties_internal(rng: &mut impl Rng) {
+        let message: [u8; 12] = [79, 77, 69, 82, 60, 61, 100, 156, 109, 125, 3, 19];
+
+        // generate signing keys and partial nonces
+        let party0_key = ExpandedKeyPair::create();
+        let party1_key = ExpandedKeyPair::create();
+
+        let (p0_private_nonces, p0_public_nonces) =
+            generate_partial_nonces_internal(&party0_key, Option::Some(&message), rng);
+        let (p1_private_nonces, p1_public_nonces) =
+            generate_partial_nonces_internal(&party1_key, Option::Some(&message), rng);
+
+        // compute aggregated public key:
+        let party0_key_agg =
+            match aggregate_public_keys(&party0_key.public_key, &party1_key.public_key) {
+                Some(pub_key_agg) => pub_key_agg,
+                None => panic!("Both public keys are the same"),
+            };
+        let party1_key_agg =
+            match aggregate_public_keys(&party1_key.public_key, &party0_key.public_key) {
+                Some(pub_key_agg) => pub_key_agg,
+                None => panic!("Both public keys are the same"),
+            };
+        assert_eq!(party0_key_agg.agg_public_key, party1_key_agg.agg_public_key);
+        assert!(
+            (party0_key_agg.musig_coefficient == Scalar::one()
+                || party1_key_agg.musig_coefficient == Scalar::one())
+                && (party0_key_agg.musig_coefficient != Scalar::one()
+                    || party1_key_agg.musig_coefficient != Scalar::one())
+        );
+        // Compute partial signatures
+        let s0 = partial_sign(
+            &p1_public_nonces,
+            &p0_public_nonces,
+            &p0_private_nonces,
+            &party0_key_agg,
+            &party0_key,
+            &message,
+        );
+        let s1 = partial_sign(
+            &p0_public_nonces,
+            &p1_public_nonces,
+            &p1_private_nonces,
+            &party1_key_agg,
+            &party1_key,
+            &message,
+        );
+
+        let signature0 = aggregate_partial_signatures(&s0, &s1.my_partial_s);
+        let signature1 = aggregate_partial_signatures(&s1, &s0.my_partial_s);
+        assert!(s0.R == s1.R, "Different partial nonce aggregation!");
+        assert!(signature0.s == signature1.s);
+        // debugging asserts
+        // assert!(s0.my_partial_s + s1.my_partial_s == signature0.s, "TEST1");
+        // verify:
+        assert!(
+            signature0
+                .verify(&message, &party0_key_agg.agg_public_key)
+                .is_ok(),
+            "Verification failed!"
+        );
+        // // Verify result against dalek
+        // assert!(
+        //     verify_dalek(&party0_key_agg.agg_public_key, &signature0, &message),
+        //     "Dalek signature verification failed!"
+        // );
     }
 }
