@@ -61,6 +61,51 @@ impl KeyPair {
         }
     }
 
+    pub fn partial_sign(
+        &self,
+        other_public_partial_nonces: &PublicPartialNonces,
+        my_public_partial_nonces: &PublicPartialNonces,
+        my_private_partial_nonces: &PrivatePartialNonces,
+        agg_public_key: &AggPublicKeyAndMusigCoeff,
+        message: &[u8],
+    ) -> (PartialSignature, AggregatedNonce) {
+        // Sum up the partial nonces from both parties index-wise, meaning,  R[i]
+        // is the sum of partial_nonces[i] from both parties
+        // NOTE: the number of nonces is v = 2 here!
+        let sum_R = [
+            my_public_partial_nonces.0[0] + other_public_partial_nonces.0[0],
+            my_public_partial_nonces.0[1] + other_public_partial_nonces.0[1],
+        ];
+
+        // Compute b as hash of nonces
+        let mut result_as_array = [0u8; 64];
+        let hash_result = &Sha512::new()
+            .chain("musig2 aggregated nonce generation")
+            .chain(agg_public_key.agg_public_key.compress().as_bytes())
+            .chain(sum_R[0].compress().as_bytes())
+            .chain(sum_R[1].compress().as_bytes())
+            .chain(message)
+            .finalize();
+        result_as_array.copy_from_slice(hash_result);
+        let b = Scalar::from_bytes_mod_order_wide(&result_as_array);
+
+        // Compute effective nonce
+        // The idea is to compute R and r s.t. R = R_0 + b•R_1 and r = r_0 + b•r_1
+        let effective_R = sum_R[0] + b * sum_R[1];
+        let effective_r = my_private_partial_nonces.0[0] + b * my_private_partial_nonces.0[1];
+
+        // Compute Fiat-Shamir challenge of signature
+        let sig_challenge = Signature::k(&effective_R, &agg_public_key.agg_public_key, message);
+
+        let partial_signature =
+            sig_challenge * agg_public_key.musig_coefficient * self.private_key + effective_r;
+
+        (
+            PartialSignature(partial_signature),
+            AggregatedNonce(effective_R),
+        )
+    }
+
     pub fn pubkey(&self) -> [u8; 32] {
         self.public_key.compress().0
     }
@@ -142,50 +187,50 @@ pub struct AggPublicKeyAndMusigCoeff {
 }
 
 impl AggPublicKeyAndMusigCoeff {
+    pub fn aggregate_public_keys(
+        my_public_key: [u8; 32],
+        other_public_key: [u8; 32],
+    ) -> Result<Self, Error> {
+        // keys should never be equal since we want the server and client to have different shares of the private key.
+        if my_public_key == other_public_key {
+            return Err(Error::PublicKeysAreEqual);
+        }
+        // By section B of the paper, we sort the public keys and set the musig coefficient for the second one as 1.
+        let mut keys = [my_public_key, other_public_key];
+        keys.sort_unstable();
+
+        let edwards_keys = [
+            edwards_from_bytes(&keys[0]).ok_or(Error::InvalidPublicKey)?,
+            edwards_from_bytes(&keys[1]).ok_or(Error::InvalidPublicKey)?,
+        ];
+
+        let mut result_as_array = [0u8; 64];
+        let hash_result = &Sha512::new()
+            .chain("musig2 public key aggregation")
+            .chain(keys[0])
+            .chain(keys[1])
+            .chain(keys[0])
+            .finalize();
+        result_as_array.copy_from_slice(hash_result);
+        let first_musig_coefficient = Scalar::from_bytes_mod_order_wide(&result_as_array);
+
+        let agg_public_key = first_musig_coefficient * edwards_keys[0] + edwards_keys[1];
+
+        let musig_coefficient = if keys[0] == my_public_key {
+            first_musig_coefficient
+        } else {
+            Scalar::one()
+        };
+
+        Ok(Self {
+            agg_public_key,
+            musig_coefficient,
+        })
+    }
+
     pub fn aggregated_pubkey(&self) -> [u8; 32] {
         self.agg_public_key.compress().0
     }
-}
-
-pub fn aggregate_public_keys(
-    my_public_key: [u8; 32],
-    other_public_key: [u8; 32],
-) -> Result<AggPublicKeyAndMusigCoeff, Error> {
-    // keys should never be equal since we want the server and client to have different shares of the private key.
-    if my_public_key == other_public_key {
-        return Err(Error::PublicKeysAreEqual);
-    }
-    // By section B of the paper, we sort the public keys and set the musig coefficient for the second one as 1.
-    let mut keys = [my_public_key, other_public_key];
-    keys.sort_unstable();
-
-    let edwards_keys = [
-        edwards_from_bytes(&keys[0]).ok_or(Error::InvalidPublicKey)?,
-        edwards_from_bytes(&keys[1]).ok_or(Error::InvalidPublicKey)?,
-    ];
-
-    let mut result_as_array = [0u8; 64];
-    let hash_result = &Sha512::new()
-        .chain("musig2 public key aggregation")
-        .chain(keys[0])
-        .chain(keys[1])
-        .chain(keys[0])
-        .finalize();
-    result_as_array.copy_from_slice(hash_result);
-    let first_musig_coefficient = Scalar::from_bytes_mod_order_wide(&result_as_array);
-
-    let agg_public_key = first_musig_coefficient * edwards_keys[0] + edwards_keys[1];
-
-    let musig_coefficient = if keys[0] == my_public_key {
-        first_musig_coefficient
-    } else {
-        Scalar::one()
-    };
-
-    Ok(AggPublicKeyAndMusigCoeff {
-        agg_public_key,
-        musig_coefficient,
-    })
 }
 
 // EdDSA Signature
@@ -196,6 +241,15 @@ pub struct Signature {
 }
 
 impl Signature {
+    pub fn aggregate_partial_signatures(
+        aggregated_nonce: AggregatedNonce,
+        partial_sigs: [PartialSignature; 2],
+    ) -> Self {
+        Self {
+            R: aggregated_nonce.0,
+            s: partial_sigs[0].0 + partial_sigs[1].0,
+        }
+    }
     pub fn verify(&self, message: &[u8], public_key: &EdwardsPoint) -> Result<(), &'static str> {
         let k = Self::k(&self.R, public_key, message);
         let A = public_key;
@@ -261,61 +315,6 @@ impl AggregatedNonce {
 
     pub fn deserialize(bytes: [u8; 32]) -> Option<Self> {
         edwards_from_bytes(&bytes).map(Self)
-    }
-}
-
-pub fn partial_sign(
-    other_public_partial_nonces: &PublicPartialNonces,
-    my_public_partial_nonces: &PublicPartialNonces,
-    my_private_partial_nonces: &PrivatePartialNonces,
-    agg_public_key: &AggPublicKeyAndMusigCoeff,
-    my_keypair: &KeyPair,
-    message: &[u8],
-) -> (PartialSignature, AggregatedNonce) {
-    // Sum up the partial nonces from both parties index-wise, meaning,  R[i]
-    // is the sum of partial_nonces[i] from both parties
-    // NOTE: the number of nonces is v = 2 here!
-    let sum_R = [
-        my_public_partial_nonces.0[0] + other_public_partial_nonces.0[0],
-        my_public_partial_nonces.0[1] + other_public_partial_nonces.0[1],
-    ];
-
-    // Compute b as hash of nonces
-    let mut result_as_array = [0u8; 64];
-    let hash_result = &Sha512::new()
-        .chain("musig2 aggregated nonce generation")
-        .chain(agg_public_key.agg_public_key.compress().as_bytes())
-        .chain(sum_R[0].compress().as_bytes())
-        .chain(sum_R[1].compress().as_bytes())
-        .chain(message)
-        .finalize();
-    result_as_array.copy_from_slice(hash_result);
-    let b = Scalar::from_bytes_mod_order_wide(&result_as_array);
-
-    // Compute effective nonce
-    // The idea is to compute R and r s.t. R = R_0 + b•R_1 and r = r_0 + b•r_1
-    let effective_R = sum_R[0] + b * sum_R[1];
-    let effective_r = my_private_partial_nonces.0[0] + b * my_private_partial_nonces.0[1];
-
-    // Compute Fiat-Shamir challenge of signature
-    let sig_challenge = Signature::k(&effective_R, &agg_public_key.agg_public_key, message);
-
-    let partial_signature =
-        sig_challenge * agg_public_key.musig_coefficient * my_keypair.private_key + effective_r;
-
-    (
-        PartialSignature(partial_signature),
-        AggregatedNonce(effective_R),
-    )
-}
-
-pub fn aggregate_partial_signatures(
-    aggregated_nonce: AggregatedNonce,
-    partial_sigs: [PartialSignature; 2],
-) -> Signature {
-    Signature {
-        R: aggregated_nonce.0,
-        s: partial_sigs[0].0 + partial_sigs[1].0,
     }
 }
 
