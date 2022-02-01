@@ -1,4 +1,4 @@
-#![allow(non_snake_case)]
+#![allow(non_snake_case, dead_code)]
 use curve25519_dalek::constants;
 use curve25519_dalek::edwards::EdwardsPoint;
 use curve25519_dalek::scalar::Scalar;
@@ -73,7 +73,7 @@ fn generate_partial_nonces_internal(
     // to the nonce, this is important for MPC implementations
     let r: [Scalar; NUMBER_OF_NONCES] = [(); NUMBER_OF_NONCES].map(|_| {
         let mut result_as_array = [0u8; 64];
-        let mut hash_result = &Sha512::new()
+        let hash_result = &Sha512::new()
             .chain("musig2 private nonce generation")
             .chain(&keys.expanded_private_key.prefix)
             .chain(message.unwrap_or(&[]))
@@ -83,7 +83,6 @@ fn generate_partial_nonces_internal(
         Scalar::from_bytes_mod_order_wide(&result_as_array)
     });
     let R: [EdwardsPoint; NUMBER_OF_NONCES] = r
-        .clone()
         .map(|scalar| &scalar * &constants::ED25519_BASEPOINT_TABLE);
     (PrivatePartialNonces { r }, PublicPartialNonces { R })
 }
@@ -147,7 +146,7 @@ impl Signature {
         let A = public_key;
 
         let kA = A * k;
-        let R_plus_kA = &kA + &self.R;
+        let R_plus_kA = kA + self.R;
         let sG = &self.s * &constants::ED25519_BASEPOINT_TABLE;
 
         if R_plus_kA == sG {
@@ -226,19 +225,21 @@ pub fn aggregate_partial_signatures(
     other_partial_s: &Scalar,
 ) -> Signature {
     Signature {
-        R: my_partial_sig.R.clone(),
-        s: my_partial_sig.my_partial_s * other_partial_s,
+        R: my_partial_sig.R,
+        s: my_partial_sig.my_partial_s + other_partial_s,
     }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::protocol::ExpandedKeyPair;
     use crate::protocol::{
         aggregate_partial_signatures, aggregate_public_keys, generate_partial_nonces_internal,
         partial_sign,
     };
+    use crate::protocol::{ExpandedKeyPair, Signature};
+    use curve25519_dalek::edwards::EdwardsPoint;
     use curve25519_dalek::scalar::Scalar;
+    use ed25519_dalek::Verifier;
     use hex::decode;
     use rand::{thread_rng, Rng};
     use rand_xoshiro::rand_core::{RngCore, SeedableRng};
@@ -250,6 +251,17 @@ pub(crate) mod tests {
         let seed = seed.unwrap_or_else(|| thread_rng().gen());
         println!("{} seed: {}", name, seed);
         Xoshiro256PlusPlus::seed_from_u64(seed)
+    }
+
+    pub fn verify_dalek(pk: &EdwardsPoint, sig: &Signature, msg: &[u8]) -> bool {
+        let mut sig_bytes = [0u8; 64];
+        sig_bytes[..32].copy_from_slice(sig.R.compress().as_bytes());
+        sig_bytes[32..].copy_from_slice(sig.s.as_bytes());
+
+        let dalek_pub = ed25519_dalek::PublicKey::from_bytes(pk.compress().as_bytes()).unwrap();
+        let dalek_sig = ed25519_dalek::Signature::from_bytes(&sig_bytes).unwrap();
+
+        dalek_pub.verify(msg, &dalek_sig).is_ok()
     }
 
     #[test]
@@ -293,7 +305,7 @@ pub(crate) mod tests {
     #[test]
     fn test_multiparty_signing_for_two_parties() {
         let mut rng = deterministic_fast_rand("test_multiparty_signing_for_two_parties", None);
-        for _i in 0..3 {
+        for _i in 0..50 {
             test_multiparty_signing_for_two_parties_internal(&mut rng);
         }
     }
@@ -351,7 +363,10 @@ pub(crate) mod tests {
         assert!(s0.R == s1.R, "Different partial nonce aggregation!");
         assert!(signature0.s == signature1.s);
         // debugging asserts
-        // assert!(s0.my_partial_s + s1.my_partial_s == signature0.s, "TEST1");
+        assert!(
+            s0.my_partial_s + s1.my_partial_s == signature0.s,
+            "signature aggregation failed!"
+        );
         // verify:
         assert!(
             signature0
@@ -359,10 +374,10 @@ pub(crate) mod tests {
                 .is_ok(),
             "Verification failed!"
         );
-        // // Verify result against dalek
-        // assert!(
-        //     verify_dalek(&party0_key_agg.agg_public_key, &signature0, &message),
-        //     "Dalek signature verification failed!"
-        // );
+        // Verify result against dalek
+        assert!(
+            verify_dalek(&party0_key_agg.agg_public_key, &signature0, &message),
+            "Dalek signature verification failed!"
+        );
     }
 }
