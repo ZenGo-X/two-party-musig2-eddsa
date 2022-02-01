@@ -256,6 +256,17 @@ pub struct Signature {
     s: Scalar,
 }
 
+#[derive(Debug, Ord, PartialOrd, PartialEq, Eq)]
+pub struct InvalidSignature;
+
+impl fmt::Display for InvalidSignature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Invalid Signature")
+    }
+}
+
+impl std::error::Error for InvalidSignature {}
+
 impl Signature {
     /// Aggregate 2 partial signatures together into a single valid ed25519 signature.
     pub fn aggregate_partial_signatures(
@@ -269,9 +280,8 @@ impl Signature {
     }
     /// Verify an ed25519 signature, this is a strict verification and requires both the public key
     /// and the signature's nonce to only be in the big prime-order sub group.
-    pub fn verify(&self, message: &[u8], public_key: [u8; 32]) -> Result<(), &'static str> {
-        const ERROR: &str = "EdDSA Signature verification failed";
-        let A = edwards_from_bytes(&public_key).ok_or(ERROR)?;
+    pub fn verify(&self, message: &[u8], public_key: [u8; 32]) -> Result<(), InvalidSignature> {
+        let A = edwards_from_bytes(&public_key).ok_or(InvalidSignature)?;
         let k = Self::k(&self.R, &A, message);
 
         let kA = A * k;
@@ -281,7 +291,7 @@ impl Signature {
         if R_plus_kA == sG {
             Ok(())
         } else {
-            Err(ERROR)
+            Err(InvalidSignature)
         }
     }
 
