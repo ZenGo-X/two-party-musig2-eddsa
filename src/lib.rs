@@ -1,12 +1,18 @@
-/*
-    Two-party implementation of the Musig2 protocol for multi-signatures of EdDSA - Schnorr signatures over Ed25519.
-    Musig2 paper: (https://eprint.iacr.org/2020/1261.pdf)
-    We implement here a two party version.
-    The number of nonces that each party uses (denoted v in the paper) is set to 2.
-    We also implement the Musig2* variant (appendix B in the paper) where one of the musig coefficients is set to 1
-    in order to save some scalar multiplication, this doesn't affect security.
-*/
+//!    Two-party implementation of the Musig2 protocol for multi-signatures of EdDSA - Schnorr signatures over Ed25519.
+//!
+//!    Musig2 paper: <https://eprint.iacr.org/2020/1261.pdf>
+//!
+//!    We implement here a two party version.
+//!
+//!    The number of nonces that each party uses (denoted v in the paper) is set to 2.
+//!
+//!    We also implement the Musig2* variant (appendix B in the paper) where one of the musig coefficients is set to 1
+//!
+//!    in order to save some scalar multiplication, this doesn't affect security.
+
 #![allow(non_snake_case)]
+#![warn(missing_docs, unsafe_code, future_incompatible)]
+
 use core::fmt;
 
 use curve25519_dalek::constants;
@@ -115,6 +121,7 @@ impl KeyPair {
         )
     }
 
+    /// Return the public key associated with the KeyPair
     pub fn pubkey(&self) -> [u8; 32] {
         self.public_key.compress().0
     }
@@ -122,11 +129,13 @@ impl KeyPair {
 
 #[derive(Debug, PartialEq, Eq)]
 /// Private Partial Nonces, they should be kept until partially signing a message and then they should be discarded.
+///
 /// SECURITY: Reusing them across signatures will cause the private key to leak
 pub struct PrivatePartialNonces([Scalar; 2]);
 
 impl PrivatePartialNonces {
     /// Serialize the private partial nonces for storage.
+    ///
     /// SECURITY: Do not reuse the nonces across signing instances. reusing the nonces will leak the private key.
     pub fn serialize(&self) -> [u8; 64] {
         let mut output = [0u8; 64];
@@ -195,7 +204,7 @@ fn generate_partial_nonces_internal(
     (PrivatePartialNonces(r), PublicPartialNonces(R))
 }
 
-// This is useful since when aggregating all public keys we also compute our musig coefficient.
+/// This is useful since when aggregating all public keys we also compute our musig coefficient.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AggPublicKeyAndMusigCoeff {
     agg_public_key: EdwardsPoint,
@@ -249,13 +258,14 @@ impl AggPublicKeyAndMusigCoeff {
     }
 }
 
-// An Ed25519 signature.
+/// An Ed25519 signature.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature {
     R: EdwardsPoint,
     s: Scalar,
 }
 
+/// An invalid signature error
 #[derive(Debug, Ord, PartialOrd, PartialEq, Eq)]
 pub struct InvalidSignature;
 
