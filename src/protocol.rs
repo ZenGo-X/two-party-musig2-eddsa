@@ -62,9 +62,8 @@ impl KeyPair {
 
     pub fn partial_sign(
         &self,
-        other_public_partial_nonces: &PublicPartialNonces,
-        my_public_partial_nonces: &PublicPartialNonces,
-        my_private_partial_nonces: &PrivatePartialNonces,
+        private_partial_nonce: PrivatePartialNonces,
+        public_partial_nonce: [PublicPartialNonces; 2],
         agg_public_key: &AggPublicKeyAndMusigCoeff,
         message: &[u8],
     ) -> (PartialSignature, AggregatedNonce) {
@@ -72,8 +71,8 @@ impl KeyPair {
         // is the sum of partial_nonces[i] from both parties
         // NOTE: the number of nonces is v = 2 here!
         let sum_R = [
-            my_public_partial_nonces.0[0] + other_public_partial_nonces.0[0],
-            my_public_partial_nonces.0[1] + other_public_partial_nonces.0[1],
+            public_partial_nonce[0].0[0] + public_partial_nonce[1].0[0],
+            public_partial_nonce[0].0[1] + public_partial_nonce[1].0[1],
         ];
 
         // Compute b as hash of nonces
@@ -89,7 +88,7 @@ impl KeyPair {
         // Compute effective nonce
         // The idea is to compute R and r s.t. R = R_0 + b•R_1 and r = r_0 + b•r_1
         let effective_R = sum_R[0] + b * sum_R[1];
-        let effective_r = my_private_partial_nonces.0[0] + b * my_private_partial_nonces.0[1];
+        let effective_r = private_partial_nonce.0[0] + b * private_partial_nonce.0[1];
 
         // Compute Fiat-Shamir challenge of signature
         let sig_challenge = Signature::k(&effective_R, &agg_public_key.agg_public_key, message);
@@ -150,8 +149,7 @@ pub fn generate_partial_nonces(
     keys: &KeyPair,
     message: Option<&[u8]>,
 ) -> (PrivatePartialNonces, PublicPartialNonces) {
-    let mut rng = rand::thread_rng();
-    generate_partial_nonces_internal(keys, message, &mut rng)
+    generate_partial_nonces_internal(keys, message, &mut thread_rng())
 }
 
 fn generate_partial_nonces_internal(
@@ -243,9 +241,10 @@ impl Signature {
             s: partial_sigs[0].0 + partial_sigs[1].0,
         }
     }
-    pub fn verify(&self, message: &[u8], public_key: &EdwardsPoint) -> Result<(), &'static str> {
-        let k = Self::k(&self.R, public_key, message);
-        let A = public_key;
+    pub fn verify(&self, message: &[u8], public_key: [u8; 32]) -> Result<(), &'static str> {
+        const ERROR: &str = "EdDSA Signature verification failed";
+        let A = edwards_from_bytes(&public_key).ok_or(ERROR)?;
+        let k = Self::k(&self.R, &A, message);
 
         let kA = A * k;
         let R_plus_kA = kA + self.R;
@@ -254,7 +253,7 @@ impl Signature {
         if R_plus_kA == sG {
             Ok(())
         } else {
-            Err("EdDSA Signature verification failed")
+            Err(ERROR)
         }
     }
 
