@@ -15,9 +15,12 @@ use curve25519_dalek::scalar::Scalar;
 use rand::{thread_rng, Rng};
 use sha2::{Digest, Sha512};
 
+/// Errors that may occur while processing signatures and keys
 #[derive(Debug)]
 pub enum Error {
+    /// aggregating 2 pubkeys that are equal is disallowed
     PublicKeysAreEqual,
+    /// Public Keys must be valid ed25519 prime order points.
     InvalidPublicKey,
 }
 impl fmt::Display for Error {
@@ -30,6 +33,7 @@ impl fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
+/// An ed25519 keypair
 pub struct KeyPair {
     public_key: EdwardsPoint,
     prefix: [u8; 32],
@@ -37,12 +41,18 @@ pub struct KeyPair {
 }
 
 impl KeyPair {
+    /// Create a new random keypair,
+    /// returns the KeyPair, and the Secret Key.
     pub fn create() -> (KeyPair, [u8; 32]) {
         let secret = thread_rng().gen();
         (Self::create_from_private_key(secret), secret)
     }
 
+    /// Create a KeyPair from an existing secret
     pub fn create_from_private_key(secret: [u8; 32]) -> KeyPair {
+        // This is according to the ed25519 spec,
+        // we use the first half of the hash as the actual private key
+        // and the other half as deterministic randomness for the nonce PRF.
         let h = Sha512::new().chain(secret).finalize();
         let mut private_key_bits: [u8; 32] = [0u8; 32];
         let mut prefix: [u8; 32] = [0u8; 32];
@@ -60,6 +70,8 @@ impl KeyPair {
         }
     }
 
+    /// Create a partial ed25519 signature,
+    /// Combining this with the other party's partial signature will result in a valid ed25519 signature
     pub fn partial_sign(
         &self,
         private_partial_nonce: PrivatePartialNonces,
@@ -76,6 +88,7 @@ impl KeyPair {
         ];
 
         // Compute b as hash of nonces
+        // `Scalar::from_hash` reduces the output mod order.
         let b = Scalar::from_hash(
             Sha512::new()
                 .chain("musig2 aggregated nonce generation")
@@ -108,9 +121,13 @@ impl KeyPair {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+/// Private Partial Nonces, they should be kept until partially signing a message and then they should be discarded.
+/// SECURITY: Reusing them across signatures will cause the private key to leak
 pub struct PrivatePartialNonces([Scalar; 2]);
 
 impl PrivatePartialNonces {
+    /// Serialize the private partial nonces for storage.
+    /// SECURITY: Do not reuse the nonces across signing instances. reusing the nonces will leak the private key.
     pub fn serialize(&self) -> [u8; 64] {
         let mut output = [0u8; 64];
         output[..32].copy_from_slice(&self.0[0].to_bytes());
@@ -118,6 +135,8 @@ impl PrivatePartialNonces {
         output
     }
 
+    /// Deserialize the private nonces,
+    /// Will return `None` if they're invalid.
     pub fn deserialize(bytes: [u8; 64]) -> Option<Self> {
         Some(Self([
             scalar_from_bytes(&bytes[..32])?,
@@ -126,10 +145,12 @@ impl PrivatePartialNonces {
     }
 }
 
+/// Public partial nonces, they should be transmitted to the other party in order to generate the aggregated nonce.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicPartialNonces([EdwardsPoint; 2]);
 
 impl PublicPartialNonces {
+    /// Serialize the public partial nonces in order to transmit the other party.
     pub fn serialize(&self) -> [u8; 64] {
         let mut output = [0u8; 64];
         output[..32].copy_from_slice(&self.0[0].compress().0[..]);
@@ -137,6 +158,7 @@ impl PublicPartialNonces {
         output
     }
 
+    /// Deserialize the public partial nonces.
     pub fn deserialize(bytes: [u8; 64]) -> Option<Self> {
         Some(Self([
             edwards_from_bytes(&bytes[..32])?,
@@ -145,6 +167,7 @@ impl PublicPartialNonces {
     }
 }
 
+/// Generate partial nonces, make sure to call this again for every signing session.
 pub fn generate_partial_nonces(
     keys: &KeyPair,
     message: Option<&[u8]>,
@@ -180,6 +203,7 @@ pub struct AggPublicKeyAndMusigCoeff {
 }
 
 impl AggPublicKeyAndMusigCoeff {
+    /// Aggregate public keys. This creates a combined public key that requires both parties in order to sign messages.
     pub fn aggregate_public_keys(
         my_public_key: [u8; 32],
         other_public_key: [u8; 32],
@@ -219,12 +243,13 @@ impl AggPublicKeyAndMusigCoeff {
         })
     }
 
+    /// Returns the serialized aggregated public key.
     pub fn aggregated_pubkey(&self) -> [u8; 32] {
         self.agg_public_key.compress().0
     }
 }
 
-// EdDSA Signature
+// An Ed25519 signature.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature {
     R: EdwardsPoint,
@@ -232,6 +257,7 @@ pub struct Signature {
 }
 
 impl Signature {
+    /// Aggregate 2 partial signatures together into a single valid ed25519 signature.
     pub fn aggregate_partial_signatures(
         aggregated_nonce: AggregatedNonce,
         partial_sigs: [PartialSignature; 2],
@@ -241,6 +267,8 @@ impl Signature {
             s: partial_sigs[0].0 + partial_sigs[1].0,
         }
     }
+    /// Verify an ed25519 signature, this is a strict verification and requires both the public key
+    /// and the signature's nonce to only be in the big prime-order sub group.
     pub fn verify(&self, message: &[u8], public_key: [u8; 32]) -> Result<(), &'static str> {
         const ERROR: &str = "EdDSA Signature verification failed";
         let A = edwards_from_bytes(&public_key).ok_or(ERROR)?;
@@ -267,6 +295,7 @@ impl Signature {
         )
     }
 
+    /// Serialize the signature
     pub fn serialize(&self) -> [u8; 64] {
         let mut out = [0u8; 64];
         out[..32].copy_from_slice(&self.R.compress().0[..]);
@@ -274,6 +303,7 @@ impl Signature {
         out
     }
 
+    /// Deserialize a signature, returns None if the bytes cannot represent a signature.
     pub fn deserialize(bytes: [u8; 64]) -> Option<Self> {
         Some(Self {
             R: edwards_from_bytes(&bytes[..32])?,
@@ -282,27 +312,33 @@ impl Signature {
     }
 }
 
+/// A partial signature, should be aggregated with another partial signature under the same aggregated public key and message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartialSignature(Scalar);
 
 impl PartialSignature {
+    /// Serialize the partial signature
     pub fn serialize(&self) -> [u8; 32] {
         self.0.to_bytes()
     }
 
+    /// Deserialize the partial signature, returns None if the bytes cannot represent a signature.
     pub fn deserialize(bytes: [u8; 32]) -> Option<Self> {
         scalar_from_bytes(&bytes).map(Self)
     }
 }
 
+/// The aggregated nonce of both parties, required for aggregating the signatures.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AggregatedNonce(EdwardsPoint);
 
 impl AggregatedNonce {
+    /// Serialize the aggregated nonce
     pub fn serialize(&self) -> [u8; 32] {
         self.0.compress().0
     }
 
+    /// Deserialize the aggregated nonce
     pub fn deserialize(bytes: [u8; 32]) -> Option<Self> {
         edwards_from_bytes(&bytes).map(Self)
     }
