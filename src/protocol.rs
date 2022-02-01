@@ -1,3 +1,11 @@
+/*
+    Two-party implementation of the Musig2 protocol for multi-signatures of EdDSA - Schnorr signatures over Ed25519.
+    Musig2 paper: (https://eprint.iacr.org/2020/1261.pdf)
+    We implement here a two party version.
+    The number of nonces that each party uses (denoted v in the paper) is set to 2.
+    We also implement the Musig2* variant (appendix B in the paper) where one of the musig coefficients is set to 1
+    in order to save some scalar multiplication, this doesn't affect security.
+*/
 #![allow(non_snake_case, dead_code)]
 use curve25519_dalek::constants;
 use curve25519_dalek::edwards::EdwardsPoint;
@@ -87,6 +95,7 @@ fn generate_partial_nonces_internal(
     (PrivatePartialNonces { r }, PublicPartialNonces { R })
 }
 
+// This is useful since when aggregating all public keys we also compute our musig coefficient.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AggPublicKeyAndMusigCoeff {
     pub agg_public_key: EdwardsPoint,
@@ -105,6 +114,7 @@ pub fn aggregate_public_keys(
     let second_pub_key: &EdwardsPoint;
     let mut my_musig_coefficient = Scalar::one();
 
+    // By section B of the paper, we sort the public keys and set the musig coefficient for the second one as 1.
     if my_public_key.compress().as_bytes() > other_public_key.compress().as_bytes() {
         first_pub_key = other_public_key;
         second_pub_key = my_public_key;
@@ -156,6 +166,7 @@ impl Signature {
         }
     }
 
+    // This is the Fiat-Shamir hash of all protocol state before signing.
     pub(crate) fn k(R: &EdwardsPoint, PK: &EdwardsPoint, message: &[u8]) -> Scalar {
         let mut result_as_array = [0u8; 64];
         let hash_result = &Sha512::new()
