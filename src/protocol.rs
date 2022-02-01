@@ -7,33 +7,43 @@
     in order to save some scalar multiplication, this doesn't affect security.
 */
 #![allow(non_snake_case, dead_code)]
+use core::fmt;
+
 use curve25519_dalek::constants;
-use curve25519_dalek::edwards::EdwardsPoint;
+use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 use curve25519_dalek::scalar::Scalar;
 use rand::{thread_rng, Rng};
 use sha2::digest::Update;
 use sha2::{Digest, Sha512};
 
-pub const NUMBER_OF_NONCES: usize = 2;
-#[derive(Clone, Debug)]
-pub struct ExpandedPrivateKey {
-    pub prefix: [u8; 32],
+#[derive(Debug)]
+pub enum Error {
+    PublicKeysAreEqual,
+    InvalidPublicKey,
+}
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PublicKeysAreEqual => f.write_str("Public keys Are Equal"),
+            Self::InvalidPublicKey => f.write_str("Invalid public key"),
+        }
+    }
+}
+impl std::error::Error for Error {}
+
+pub struct KeyPair {
+    public_key: EdwardsPoint,
+    prefix: [u8; 32],
     private_key: Scalar,
 }
 
-#[derive(Clone, Debug)]
-pub struct ExpandedKeyPair {
-    pub public_key: EdwardsPoint,
-    expanded_private_key: ExpandedPrivateKey,
-}
-
-impl ExpandedKeyPair {
-    pub fn create() -> ExpandedKeyPair {
+impl KeyPair {
+    pub fn create() -> (KeyPair, [u8; 32]) {
         let secret = thread_rng().gen();
-        Self::create_from_private_key(secret)
+        (Self::create_from_private_key(secret), secret)
     }
 
-    pub fn create_from_private_key(secret: [u8; 32]) -> ExpandedKeyPair {
+    pub fn create_from_private_key(secret: [u8; 32]) -> KeyPair {
         let h = Sha512::new().chain(secret).finalize();
         let mut private_key_bits: [u8; 32] = [0u8; 32];
         let mut prefix: [u8; 32] = [0u8; 32];
@@ -44,28 +54,58 @@ impl ExpandedKeyPair {
         private_key_bits[31] |= 64;
         let private_key = Scalar::from_bits(private_key_bits);
         let public_key = &private_key * &constants::ED25519_BASEPOINT_TABLE;
-        ExpandedKeyPair {
+        Self {
             public_key,
-            expanded_private_key: ExpandedPrivateKey {
-                prefix,
-                private_key,
-            },
+            prefix,
+            private_key,
         }
+    }
+
+    pub fn pubkey(&self) -> [u8; 32] {
+        self.public_key.compress().0
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct PrivatePartialNonces {
-    pub r: [Scalar; NUMBER_OF_NONCES],
+#[derive(Debug, PartialEq, Eq)]
+pub struct PrivatePartialNonces([Scalar; 2]);
+
+impl PrivatePartialNonces {
+    pub fn serialize(&self) -> [u8; 64] {
+        let mut output = [0u8; 64];
+        output[..32].copy_from_slice(&self.0[0].to_bytes());
+        output[32..64].copy_from_slice(&self.0[1].to_bytes());
+        output
+    }
+
+    pub fn deserialize(bytes: [u8; 64]) -> Option<Self> {
+        Some(Self([
+            scalar_from_bytes(&bytes[..32])?,
+            scalar_from_bytes(&bytes[32..64])?,
+        ]))
+    }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct PublicPartialNonces {
-    pub R: [EdwardsPoint; NUMBER_OF_NONCES],
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicPartialNonces([EdwardsPoint; 2]);
+
+impl PublicPartialNonces {
+    pub fn serialize(&self) -> [u8; 64] {
+        let mut output = [0u8; 64];
+        output[..32].copy_from_slice(&self.0[0].compress().0[..]);
+        output[32..64].copy_from_slice(&self.0[1].compress().0[..]);
+        output
+    }
+
+    pub fn deserialize(bytes: [u8; 64]) -> Option<Self> {
+        Some(Self([
+            edwards_from_bytes(&bytes[..32])?,
+            edwards_from_bytes(&bytes[32..64])?,
+        ]))
+    }
 }
 
 pub fn generate_partial_nonces(
-    keys: &ExpandedKeyPair,
+    keys: &KeyPair,
     message: Option<&[u8]>,
 ) -> (PrivatePartialNonces, PublicPartialNonces) {
     let mut rng = rand::thread_rng();
@@ -73,81 +113,86 @@ pub fn generate_partial_nonces(
 }
 
 fn generate_partial_nonces_internal(
-    keys: &ExpandedKeyPair,
+    keys: &KeyPair,
     message: Option<&[u8]>,
     rng: &mut impl Rng,
 ) -> (PrivatePartialNonces, PublicPartialNonces) {
     // here we deviate from the spec, by introducing  non-deterministic element (random number)
     // to the nonce, this is important for MPC implementations
-    let r: [Scalar; NUMBER_OF_NONCES] = [(); NUMBER_OF_NONCES].map(|_| {
+    let r: [Scalar; 2] = [(); 2].map(|_| {
         let mut result_as_array = [0u8; 64];
         let hash_result = &Sha512::new()
             .chain("musig2 private nonce generation")
-            .chain(&keys.expanded_private_key.prefix)
+            .chain(&keys.prefix)
             .chain(message.unwrap_or(&[]))
             .chain(rng.gen::<[u8; 32]>())
             .finalize();
         result_as_array.copy_from_slice(hash_result);
         Scalar::from_bytes_mod_order_wide(&result_as_array)
     });
-    let R: [EdwardsPoint; NUMBER_OF_NONCES] = r
-        .map(|scalar| &scalar * &constants::ED25519_BASEPOINT_TABLE);
-    (PrivatePartialNonces { r }, PublicPartialNonces { R })
+    let R: [EdwardsPoint; 2] = r.map(|scalar| &scalar * &constants::ED25519_BASEPOINT_TABLE);
+    (PrivatePartialNonces(r), PublicPartialNonces(R))
 }
 
 // This is useful since when aggregating all public keys we also compute our musig coefficient.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AggPublicKeyAndMusigCoeff {
-    pub agg_public_key: EdwardsPoint,
-    pub musig_coefficient: Scalar,
+    agg_public_key: EdwardsPoint,
+    musig_coefficient: Scalar,
+}
+
+impl AggPublicKeyAndMusigCoeff {
+    pub fn aggregated_pubkey(&self) -> [u8; 32] {
+        self.agg_public_key.compress().0
+    }
 }
 
 pub fn aggregate_public_keys(
-    my_public_key: &EdwardsPoint,
-    other_public_key: &EdwardsPoint,
-) -> Option<AggPublicKeyAndMusigCoeff> {
+    my_public_key: [u8; 32],
+    other_public_key: [u8; 32],
+) -> Result<AggPublicKeyAndMusigCoeff, Error> {
     // keys should never be equal since we want the server and client to have different shares of the private key.
     if my_public_key == other_public_key {
-        return None;
+        return Err(Error::PublicKeysAreEqual);
     }
-    let first_pub_key: &EdwardsPoint;
-    let second_pub_key: &EdwardsPoint;
-    let mut my_musig_coefficient = Scalar::one();
-
     // By section B of the paper, we sort the public keys and set the musig coefficient for the second one as 1.
-    if my_public_key.compress().as_bytes() > other_public_key.compress().as_bytes() {
-        first_pub_key = other_public_key;
-        second_pub_key = my_public_key;
-    } else {
-        first_pub_key = my_public_key;
-        second_pub_key = other_public_key;
-    }
+    let mut keys = [my_public_key, other_public_key];
+    keys.sort_unstable();
+
+    let edwards_keys = [
+        edwards_from_bytes(&keys[0]).ok_or(Error::InvalidPublicKey)?,
+        edwards_from_bytes(&keys[1]).ok_or(Error::InvalidPublicKey)?,
+    ];
 
     let mut result_as_array = [0u8; 64];
     let hash_result = &Sha512::new()
-        .chain_update("musig2 public key aggregation")
-        .chain_update(first_pub_key.compress().as_bytes())
-        .chain_update(second_pub_key.compress().as_bytes())
-        .chain_update(first_pub_key.compress().as_bytes())
+        .chain("musig2 public key aggregation")
+        .chain(keys[0])
+        .chain(keys[1])
+        .chain(keys[0])
         .finalize();
     result_as_array.copy_from_slice(hash_result);
     let first_musig_coefficient = Scalar::from_bytes_mod_order_wide(&result_as_array);
-    let agg_public_key = first_musig_coefficient * first_pub_key + second_pub_key;
-    if first_pub_key == my_public_key {
-        my_musig_coefficient = first_musig_coefficient;
-    }
 
-    Some(AggPublicKeyAndMusigCoeff {
+    let agg_public_key = first_musig_coefficient * edwards_keys[0] + edwards_keys[1];
+
+    let musig_coefficient = if keys[0] == my_public_key {
+        first_musig_coefficient
+    } else {
+        Scalar::one()
+    };
+
+    Ok(AggPublicKeyAndMusigCoeff {
         agg_public_key,
-        musig_coefficient: my_musig_coefficient,
+        musig_coefficient,
     })
 }
 
 // EdDSA Signature
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature {
-    pub R: EdwardsPoint,
-    pub s: Scalar,
+    R: EdwardsPoint,
+    s: Scalar,
 }
 
 impl Signature {
@@ -167,7 +212,7 @@ impl Signature {
     }
 
     // This is the Fiat-Shamir hash of all protocol state before signing.
-    pub(crate) fn k(R: &EdwardsPoint, PK: &EdwardsPoint, message: &[u8]) -> Scalar {
+    fn k(R: &EdwardsPoint, PK: &EdwardsPoint, message: &[u8]) -> Scalar {
         let mut result_as_array = [0u8; 64];
         let hash_result = &Sha512::new()
             .chain(R.compress().as_bytes())
@@ -177,12 +222,46 @@ impl Signature {
         result_as_array.copy_from_slice(hash_result);
         Scalar::from_bytes_mod_order_wide(&result_as_array)
     }
+
+    pub fn serialize(&self) -> [u8; 64] {
+        let mut out = [0u8; 64];
+        out[..32].copy_from_slice(&self.R.compress().0[..]);
+        out[32..].copy_from_slice(&self.s.as_bytes()[..]);
+        out
+    }
+
+    pub fn deserialize(bytes: [u8; 64]) -> Option<Self> {
+        Some(Self {
+            R: edwards_from_bytes(&bytes[..32])?,
+            s: scalar_from_bytes(&bytes[32..64])?,
+        })
+    }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct PartialSignature {
-    pub R: EdwardsPoint,
-    pub my_partial_s: Scalar,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartialSignature(Scalar);
+
+impl PartialSignature {
+    pub fn serialize(&self) -> [u8; 32] {
+        self.0.to_bytes()
+    }
+
+    pub fn deserialize(bytes: [u8; 32]) -> Option<Self> {
+        scalar_from_bytes(&bytes).map(Self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AggregatedNonce(EdwardsPoint);
+
+impl AggregatedNonce {
+    pub fn serialize(&self) -> [u8; 32] {
+        self.0.compress().0
+    }
+
+    pub fn deserialize(bytes: [u8; 32]) -> Option<Self> {
+        edwards_from_bytes(&bytes).map(Self)
+    }
 }
 
 pub fn partial_sign(
@@ -190,15 +269,15 @@ pub fn partial_sign(
     my_public_partial_nonces: &PublicPartialNonces,
     my_private_partial_nonces: &PrivatePartialNonces,
     agg_public_key: &AggPublicKeyAndMusigCoeff,
-    my_keypair: &ExpandedKeyPair,
+    my_keypair: &KeyPair,
     message: &[u8],
-) -> PartialSignature {
+) -> (PartialSignature, AggregatedNonce) {
     // Sum up the partial nonces from both parties index-wise, meaning,  R[i]
     // is the sum of partial_nonces[i] from both parties
     // NOTE: the number of nonces is v = 2 here!
     let sum_R = [
-        my_public_partial_nonces.R[0] + other_public_partial_nonces.R[0],
-        my_public_partial_nonces.R[1] + other_public_partial_nonces.R[1],
+        my_public_partial_nonces.0[0] + other_public_partial_nonces.0[0],
+        my_public_partial_nonces.0[1] + other_public_partial_nonces.0[1],
     ];
 
     // Compute b as hash of nonces
@@ -216,29 +295,65 @@ pub fn partial_sign(
     // Compute effective nonce
     // The idea is to compute R and r s.t. R = R_0 + b•R_1 and r = r_0 + b•r_1
     let effective_R = sum_R[0] + b * sum_R[1];
-    let effective_r = my_private_partial_nonces.r[0] + b * my_private_partial_nonces.r[1];
+    let effective_r = my_private_partial_nonces.0[0] + b * my_private_partial_nonces.0[1];
 
     // Compute Fiat-Shamir challenge of signature
     let sig_challenge = Signature::k(&effective_R, &agg_public_key.agg_public_key, message);
 
-    let partial_signature = sig_challenge
-        * agg_public_key.musig_coefficient
-        * my_keypair.expanded_private_key.private_key
-        + effective_r;
-    PartialSignature {
-        R: effective_R,
-        my_partial_s: partial_signature,
-    }
+    let partial_signature =
+        sig_challenge * agg_public_key.musig_coefficient * my_keypair.private_key + effective_r;
+
+    (
+        PartialSignature(partial_signature),
+        AggregatedNonce(effective_R),
+    )
 }
 
 pub fn aggregate_partial_signatures(
-    my_partial_sig: &PartialSignature,
-    other_partial_s: &Scalar,
+    aggregated_nonce: AggregatedNonce,
+    partial_sigs: [PartialSignature; 2],
 ) -> Signature {
     Signature {
-        R: my_partial_sig.R,
-        s: my_partial_sig.my_partial_s + other_partial_s,
+        R: aggregated_nonce.0,
+        s: partial_sigs[0].0 + partial_sigs[1].0,
     }
+}
+
+/// Converts 32 bytes into a Scalar, checking that the scalar is fully reduced.
+///
+/// # Panics
+/// If the input `bytes` slice does not have a length of 32.
+#[inline(always)]
+fn scalar_from_bytes(bytes: &[u8]) -> Option<Scalar> {
+    // Source: https://github.com/dalek-cryptography/ed25519-dalek/blob/ad461f4/src/signature.rs#L85
+    let bytes: [u8; 32] = bytes.try_into().unwrap();
+    // Since this is only used in signature deserialisation (i.e. upon
+    // verification), we can do a "succeed fast" trick by checking that the most
+    // significant 4 bits are unset.  If they are unset, we can succeed fast
+    // because we are guaranteed that the scalar is fully reduced.  However, if
+    // the 4th most significant bit is set, we must do the full reduction check,
+    // as the order of the basepoint is roughly a 2^(252.5) bit number.
+    //
+    // This succeed-fast trick should succeed for roughly half of all scalars.
+    if bytes[31] & 240 == 0 {
+        Some(Scalar::from_bits(bytes))
+    } else {
+        Scalar::from_canonical_bytes(bytes)
+    }
+}
+
+/// Converts 32 bytes into an edwards point.
+/// Checks both that the Y coordinate is on the curve, and that the resulting point is torsion free.
+///
+/// # Panics
+/// If the input `bytes` slice does not have a length of 32.
+#[inline(always)]
+fn edwards_from_bytes(bytes: &[u8]) -> Option<EdwardsPoint> {
+    let point = CompressedEdwardsY::from_slice(bytes).decompress()?;
+    // We require that the point will be 0 in the small subgroup,
+    // `is_small_order()` checks if the point is *only* in the small subgroup,
+    // while `is_torsion_free()` makes sure the point is 0 in the small subgroup.
+    point.is_torsion_free().then(|| point)
 }
 
 #[cfg(test)]
