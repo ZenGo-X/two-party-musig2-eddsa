@@ -13,7 +13,6 @@ use curve25519_dalek::constants;
 use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 use curve25519_dalek::scalar::Scalar;
 use rand::{thread_rng, Rng};
-use sha2::digest::Update;
 use sha2::{Digest, Sha512};
 
 #[derive(Debug)]
@@ -78,16 +77,14 @@ impl KeyPair {
         ];
 
         // Compute b as hash of nonces
-        let mut result_as_array = [0u8; 64];
-        let hash_result = &Sha512::new()
-            .chain("musig2 aggregated nonce generation")
-            .chain(agg_public_key.agg_public_key.compress().as_bytes())
-            .chain(sum_R[0].compress().as_bytes())
-            .chain(sum_R[1].compress().as_bytes())
-            .chain(message)
-            .finalize();
-        result_as_array.copy_from_slice(hash_result);
-        let b = Scalar::from_bytes_mod_order_wide(&result_as_array);
+        let b = Scalar::from_hash(
+            Sha512::new()
+                .chain("musig2 aggregated nonce generation")
+                .chain(agg_public_key.agg_public_key.compress().as_bytes())
+                .chain(sum_R[0].compress().as_bytes())
+                .chain(sum_R[1].compress().as_bytes())
+                .chain(message),
+        );
 
         // Compute effective nonce
         // The idea is to compute R and r s.t. R = R_0 + b•R_1 and r = r_0 + b•r_1
@@ -165,15 +162,13 @@ fn generate_partial_nonces_internal(
     // here we deviate from the spec, by introducing  non-deterministic element (random number)
     // to the nonce, this is important for MPC implementations
     let r: [Scalar; 2] = [(); 2].map(|_| {
-        let mut result_as_array = [0u8; 64];
-        let hash_result = &Sha512::new()
-            .chain("musig2 private nonce generation")
-            .chain(&keys.prefix)
-            .chain(message.unwrap_or(&[]))
-            .chain(rng.gen::<[u8; 32]>())
-            .finalize();
-        result_as_array.copy_from_slice(hash_result);
-        Scalar::from_bytes_mod_order_wide(&result_as_array)
+        Scalar::from_hash(
+            Sha512::new()
+                .chain("musig2 private nonce generation")
+                .chain(&keys.prefix)
+                .chain(message.unwrap_or(&[]))
+                .chain(rng.gen::<[u8; 32]>()),
+        )
     });
     let R: [EdwardsPoint; 2] = r.map(|scalar| &scalar * &constants::ED25519_BASEPOINT_TABLE);
     (PrivatePartialNonces(r), PublicPartialNonces(R))
@@ -204,15 +199,13 @@ impl AggPublicKeyAndMusigCoeff {
             edwards_from_bytes(&keys[1]).ok_or(Error::InvalidPublicKey)?,
         ];
 
-        let mut result_as_array = [0u8; 64];
-        let hash_result = &Sha512::new()
-            .chain("musig2 public key aggregation")
-            .chain(keys[0])
-            .chain(keys[1])
-            .chain(keys[0])
-            .finalize();
-        result_as_array.copy_from_slice(hash_result);
-        let first_musig_coefficient = Scalar::from_bytes_mod_order_wide(&result_as_array);
+        let first_musig_coefficient = Scalar::from_hash(
+            Sha512::new()
+                .chain("musig2 public key aggregation")
+                .chain(keys[0])
+                .chain(keys[1])
+                .chain(keys[0]),
+        );
 
         let agg_public_key = first_musig_coefficient * edwards_keys[0] + edwards_keys[1];
 
@@ -267,14 +260,12 @@ impl Signature {
 
     // This is the Fiat-Shamir hash of all protocol state before signing.
     fn k(R: &EdwardsPoint, PK: &EdwardsPoint, message: &[u8]) -> Scalar {
-        let mut result_as_array = [0u8; 64];
-        let hash_result = &Sha512::new()
-            .chain(R.compress().as_bytes())
-            .chain(PK.compress().as_bytes())
-            .chain(message)
-            .finalize();
-        result_as_array.copy_from_slice(hash_result);
-        Scalar::from_bytes_mod_order_wide(&result_as_array)
+        Scalar::from_hash(
+            Sha512::new()
+                .chain(R.compress().as_bytes())
+                .chain(PK.compress().as_bytes())
+                .chain(message),
+        )
     }
 
     pub fn serialize(&self) -> [u8; 64] {
