@@ -47,6 +47,13 @@ jobs:
         with:
           command: test
 
+      - name: Run signing example
+        uses: actions-rs/cargo@v1
+        with:
+          command: run
+          args: --example signing
+
+
   test-release:
     name: Test Suite Release
     runs-on: ${{ matrix.os }}
@@ -69,6 +76,14 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --release
+
+      - name: Run signing example --release
+        uses: actions-rs/cargo@v1
+        with:
+          command: run
+          args: --release --example signing
+
 
   lints:
     name: Lints
