@@ -435,6 +435,27 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn test_sign_dalek_verify_zengo() {
+        let mut rng = deterministic_fast_rand("test_sign_dalek_verify_zengo", None);
+
+        let mut privkey = [0u8; 32];
+        let mut msg = [0u8; 512];
+        for msg_len in 0..msg.len() {
+            let msg = &mut msg[..msg_len];
+            rng.fill_bytes(&mut privkey);
+            rng.fill_bytes(msg);
+            let dalek_secret = ed25519_dalek::SecretKey::from_bytes(&privkey)
+                .expect("Can only fail if bytes.len()<32");
+            let dalek_expanded_secret = ed25519_dalek::ExpandedSecretKey::from(&dalek_secret);
+            let dalek_pub = ed25519_dalek::PublicKey::from(&dalek_expanded_secret);
+            let dalek_sig = dalek_expanded_secret.sign(msg, &dalek_pub);
+
+            let zengo_sig = Signature::deserialize(dalek_sig.to_bytes()).unwrap();
+            zengo_sig.verify(msg, dalek_pub.to_bytes()).unwrap();
+        }
+    }
+
+    #[test]
     fn test_ed25519_generate_keypair_from_seed() {
         let priv_str = "48ab347b2846f96b7bcd00bf985c52b83b92415c5c914bc1f3b09e186cf2b14f"; // Private Key
         let priv_dec: [u8; 32] = decode(priv_str).unwrap().try_into().unwrap();
@@ -454,22 +475,25 @@ pub(crate) mod tests {
     #[test]
     fn test_multiparty_signing_for_two_parties() {
         let mut rng = deterministic_fast_rand("test_multiparty_signing_for_two_parties", None);
-        for _ in 0..50 {
-            test_multiparty_signing_for_two_parties_internal(&mut rng);
+
+        let mut msg = [0u8; 256];
+        for msg_len in 0..msg.len() {
+            let msg = &mut msg[..msg_len];
+            rng.fill_bytes(msg);
+            test_multiparty_signing_for_two_parties_internal(&mut rng, msg);
         }
     }
 
-    fn test_multiparty_signing_for_two_parties_internal(rng: &mut impl Rng) {
-        let message: [u8; 12] = [79, 77, 69, 82, 60, 61, 100, 156, 109, 125, 3, 19];
-
+    fn test_multiparty_signing_for_two_parties_internal(rng: &mut impl Rng, msg: &[u8]) {
         // generate signing keys and partial nonces
         let party0_key = KeyPair::create_from_private_key(rng.gen());
         let party1_key = KeyPair::create_from_private_key(rng.gen());
 
+        // randomly either pass `Some(msg)` or `None`.
         let (p0_private_nonces, p0_public_nonces) =
-            generate_partial_nonces_internal(&party0_key, Option::Some(&message), rng);
+            generate_partial_nonces_internal(&party0_key, rng.gen::<bool>().then(|| msg), rng);
         let (p1_private_nonces, p1_public_nonces) =
-            generate_partial_nonces_internal(&party1_key, Option::Some(&message), rng);
+            generate_partial_nonces_internal(&party1_key, rng.gen::<bool>().then(|| msg), rng);
 
         // compute aggregated public key:
         let party0_key_agg = AggPublicKeyAndMusigCoeff::aggregate_public_keys(
@@ -496,13 +520,13 @@ pub(crate) mod tests {
             p0_private_nonces,
             [p1_public_nonces.clone(), p0_public_nonces.clone()],
             &party0_key_agg,
-            &message,
+            msg,
         );
         let (s1, aggregated_nonce1) = party1_key.partial_sign(
             p1_private_nonces,
             [p0_public_nonces, p1_public_nonces],
             &party1_key_agg,
-            &message,
+            msg,
         );
         assert_eq!(aggregated_nonce0, aggregated_nonce1);
         assert_eq!(aggregated_nonce0.serialize(), aggregated_nonce1.serialize());
@@ -518,7 +542,7 @@ pub(crate) mod tests {
         // verify:
         assert!(
             signature0
-                .verify(&message, party0_key_agg.aggregated_pubkey())
+                .verify(msg, party0_key_agg.aggregated_pubkey())
                 .is_ok(),
             "Verification failed!"
         );
@@ -527,7 +551,7 @@ pub(crate) mod tests {
             verify_dalek(
                 party0_key_agg.aggregated_pubkey(),
                 signature0.serialize(),
-                &message
+                msg
             ),
             "Dalek signature verification failed!"
         );
