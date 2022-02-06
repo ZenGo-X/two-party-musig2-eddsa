@@ -11,7 +11,7 @@ exclude = [".gitignore"]
 [dependencies]
 curve25519-dalek = "3"
 rand = "0.8"
-sha2 = "0.10"
+sha2 = "0.9"
 
 [dev-dependencies]
 ed25519-dalek = "1.0.1"
