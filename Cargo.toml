@@ -6,7 +6,7 @@ edition = "2021"
 authors = [
     "Shalev Keren <shalev@zengo.com>"
 ]
-exclude = [".gitignore"]
+exclude = [".gitignore", ".github/"]
 
 [dependencies]
 curve25519-dalek = "3"
