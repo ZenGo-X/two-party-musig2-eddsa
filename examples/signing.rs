@@ -9,7 +9,7 @@ const MESSAGE: &[u8] = b"Message To Be signed";
 
 fn launch_party(
     sender: mpsc::Sender<Vec<u8>>,
-    reciever: mpsc::Receiver<Vec<u8>>,
+    receiver: mpsc::Receiver<Vec<u8>>,
 ) -> Result<Signature, &'static str> {
     // Generate a Key Pair
     let (keypair, _secret) = KeyPair::create();
@@ -17,7 +17,7 @@ fn launch_party(
     // Send your public key to the counterparty.
     sender.send(keypair.pubkey().to_vec()).unwrap();
     // Receive the counterparty's public key.
-    let other_pubkey: [u8; 32] = reciever
+    let other_pubkey: [u8; 32] = receiver
         .recv_array()
         .map_err(|_| "Public keys are 32 bytes")?;
 
@@ -26,7 +26,7 @@ fn launch_party(
         AggPublicKeyAndMusigCoeff::aggregate_public_keys(keypair.pubkey(), other_pubkey)
             .map_err(|_| "Received an invalid public key")?;
 
-    // Generate nocnces.
+    // Generate nonces.
     // Note that the message is optional, so this can be done before you know what you're signing on.
     let (private_nonces, public_nonces) = generate_partial_nonces(&keypair, Some(MESSAGE));
 
@@ -34,7 +34,7 @@ fn launch_party(
     sender.send(public_nonces.serialize().to_vec()).unwrap();
     // Receive the counterparty's nonces.
     let other_party_nonces = PublicPartialNonces::deserialize(
-        reciever
+        receiver
             .recv_array()
             .map_err(|_| "Public nonces are 64 bytes")?,
     )
@@ -53,7 +53,7 @@ fn launch_party(
 
     // Receive the partial signature from the counterparty.
     let other_partial_sig = PartialSignature::deserialize(
-        reciever
+        receiver
             .recv_array()
             .map_err(|_| "Partial Signatures are 32 bytes")?,
     )
@@ -70,10 +70,10 @@ fn launch_party(
 }
 
 fn main() {
-    let (sender1, reciever2) = mpsc::channel();
-    let (sender2, reciever1) = mpsc::channel();
-    let party1 = std::thread::spawn(move || launch_party(sender1, reciever1));
-    let party2 = std::thread::spawn(move || launch_party(sender2, reciever2));
+    let (sender1, receiver2) = mpsc::channel();
+    let (sender2, receiver1) = mpsc::channel();
+    let party1 = std::thread::spawn(move || launch_party(sender1, receiver1));
+    let party2 = std::thread::spawn(move || launch_party(sender2, receiver2));
     let sig1 = party1.join().unwrap().unwrap();
     println!(
         "party 1 finished without an error! signature: {:?}",
