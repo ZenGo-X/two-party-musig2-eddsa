@@ -20,6 +20,7 @@ use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 use curve25519_dalek::scalar::Scalar;
 use rand::{thread_rng, Rng};
 use sha2::{Digest, Sha512};
+use serde::{Serialize, Deserialize};
 
 /// Errors that may occur while processing signatures and keys
 #[derive(Debug)]
@@ -40,6 +41,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /// An ed25519 keypair
+#[derive(Serialize, Deserialize)]
 pub struct KeyPair {
     public_key: EdwardsPoint,
     prefix: [u8; 32],
@@ -226,7 +228,7 @@ fn generate_partial_nonces_internal(
 }
 
 /// This is useful since when aggregating all public keys we also compute our musig coefficient.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AggPublicKeyAndMusigCoeff {
     agg_public_key: EdwardsPoint,
     musig_coefficient: Scalar,
@@ -279,15 +281,15 @@ impl AggPublicKeyAndMusigCoeff {
     }
 
     /// Serialize the aggregated public key and the musig coefficient for storage.
-    pub fn serialize(&self) -> [u8; 96] {
-        let mut output = [0u8; 96];
+    pub fn serialize(&self) -> [u8; 64] {
+        let mut output = [0u8; 64];
         output[..32].copy_from_slice(&self.agg_public_key.compress().0[..]);
         output[32..64].copy_from_slice(&self.musig_coefficient.as_bytes()[..]);
         output
     }
 
     /// Deserialize from bytes as [agg_public_key, musig_coefficient].
-    pub fn deserialize(bytes: [u8; 96]) -> Option<Self> {
+    pub fn deserialize(bytes: [u8; 64]) -> Option<Self> {
         Some(Self {
             agg_public_key: edwards_from_bytes(&bytes[..32])?,
             musig_coefficient: scalar_from_bytes(&bytes[32..64])?,
