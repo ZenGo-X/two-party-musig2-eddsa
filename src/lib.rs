@@ -150,7 +150,7 @@ impl KeyPair {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// Private Partial Nonces, they should be kept until partially signing a message and then they should be discarded.
 ///
 /// SECURITY: Reusing them across signatures will cause the private key to leak
@@ -178,7 +178,7 @@ impl PrivatePartialNonces {
 }
 
 /// Public partial nonces, they should be transmitted to the other party in order to generate the aggregated nonce.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicPartialNonces([EdwardsPoint; 2]);
 
 impl PublicPartialNonces {
@@ -298,7 +298,7 @@ impl AggPublicKeyAndMusigCoeff {
 }
 
 /// An Ed25519 signature.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Signature {
     R: EdwardsPoint,
     s: Scalar,
@@ -372,7 +372,7 @@ impl Signature {
 }
 
 /// A partial signature, should be aggregated with another partial signature under the same aggregated public key and message.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PartialSignature(Scalar);
 
 impl PartialSignature {
@@ -388,7 +388,7 @@ impl PartialSignature {
 }
 
 /// The aggregated nonce of both parties, required for aggregating the signatures.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AggregatedNonce(EdwardsPoint);
 
 impl AggregatedNonce {
