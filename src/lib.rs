@@ -125,6 +125,27 @@ impl KeyPair {
     pub fn pubkey(&self) -> [u8; 32] {
         self.public_key.compress().0
     }
+
+    /// Serialize the keypair for PRIVATE storage purposes - DO NOT SHARE.
+    pub fn serialize(&self) -> [u8; 96] {
+        let mut output = [0u8; 96];
+        output[..32].copy_from_slice(&self.public_key.compress().0[..]);
+        output[32..64].copy_from_slice(&self.prefix[..]);
+        output[64..96].copy_from_slice(&self.private_key.as_bytes()[..]);
+        output
+    }
+
+    /// Deserialize a keypair from bytes as [public_key, prefix, private_key].
+    pub fn deserialize(bytes: [u8; 96]) -> Option<Self> {
+        let mut prefix = [0u8; 32];
+        prefix.copy_from_slice(&bytes[32..64]);
+
+        Some(Self {
+            public_key: edwards_from_bytes(&bytes[..32])?,
+            prefix,
+            private_key: scalar_from_bytes(&bytes[64..96])?,
+        })
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -255,6 +276,22 @@ impl AggPublicKeyAndMusigCoeff {
     /// Returns the serialized aggregated public key.
     pub fn aggregated_pubkey(&self) -> [u8; 32] {
         self.agg_public_key.compress().0
+    }
+
+    /// Serialize the aggregated public key and the musig coefficient for storage.
+    pub fn serialize(&self) -> [u8; 96] {
+        let mut output = [0u8; 96];
+        output[..32].copy_from_slice(&self.agg_public_key.compress().0[..]);
+        output[32..64].copy_from_slice(&self.musig_coefficient.as_bytes()[..]);
+        output
+    }
+
+    /// Deserialize from bytes as [agg_public_key, musig_coefficient].
+    pub fn deserialize(bytes: [u8; 96]) -> Option<Self> {
+        Some(Self {
+            agg_public_key: edwards_from_bytes(&bytes[..32])?,
+            musig_coefficient: scalar_from_bytes(&bytes[32..64])?,
+        })
     }
 }
 
