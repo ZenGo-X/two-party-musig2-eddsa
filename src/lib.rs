@@ -12,6 +12,7 @@
 
 #![allow(non_snake_case)]
 #![warn(missing_docs, unsafe_code, future_incompatible)]
+mod serde;
 
 use core::fmt;
 
@@ -20,7 +21,6 @@ use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 use curve25519_dalek::scalar::Scalar;
 use rand::{thread_rng, Rng};
 use sha2::{Digest, Sha512};
-use serde::{Serialize, Deserialize};
 
 /// Errors that may occur while processing signatures and keys
 #[derive(Debug)]
@@ -41,7 +41,6 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /// An ed25519 keypair
-#[derive(Serialize, Deserialize)]
 pub struct KeyPair {
     public_key: EdwardsPoint,
     prefix: [u8; 32],
@@ -51,6 +50,7 @@ pub struct KeyPair {
 impl KeyPair {
     /// Create a new random keypair,
     /// returns the KeyPair, and the Secret Key.
+    /// restoring a KeyPair from the secret key can be done using [`KeyPair::create_from_private_key`]
     pub fn create() -> (KeyPair, [u8; 32]) {
         let secret = thread_rng().gen();
         (Self::create_from_private_key(secret), secret)
@@ -127,30 +127,9 @@ impl KeyPair {
     pub fn pubkey(&self) -> [u8; 32] {
         self.public_key.compress().0
     }
-
-    /// Serialize the keypair for PRIVATE storage purposes - DO NOT SHARE.
-    pub fn serialize(&self) -> [u8; 96] {
-        let mut output = [0u8; 96];
-        output[..32].copy_from_slice(&self.public_key.compress().0[..]);
-        output[32..64].copy_from_slice(&self.prefix[..]);
-        output[64..96].copy_from_slice(&self.private_key.as_bytes()[..]);
-        output
-    }
-
-    /// Deserialize a keypair from bytes as [public_key, prefix, private_key].
-    pub fn deserialize(bytes: [u8; 96]) -> Option<Self> {
-        let mut prefix = [0u8; 32];
-        prefix.copy_from_slice(&bytes[32..64]);
-
-        Some(Self {
-            public_key: edwards_from_bytes(&bytes[..32])?,
-            prefix,
-            private_key: scalar_from_bytes(&bytes[64..96])?,
-        })
-    }
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq)]
 /// Private Partial Nonces, they should be kept until partially signing a message and then they should be discarded.
 ///
 /// SECURITY: Reusing them across signatures will cause the private key to leak
@@ -178,7 +157,7 @@ impl PrivatePartialNonces {
 }
 
 /// Public partial nonces, they should be transmitted to the other party in order to generate the aggregated nonce.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicPartialNonces([EdwardsPoint; 2]);
 
 impl PublicPartialNonces {
@@ -228,7 +207,7 @@ fn generate_partial_nonces_internal(
 }
 
 /// This is useful since when aggregating all public keys we also compute our musig coefficient.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AggPublicKeyAndMusigCoeff {
     agg_public_key: EdwardsPoint,
     musig_coefficient: Scalar,
@@ -298,7 +277,7 @@ impl AggPublicKeyAndMusigCoeff {
 }
 
 /// An Ed25519 signature.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature {
     R: EdwardsPoint,
     s: Scalar,
@@ -372,7 +351,7 @@ impl Signature {
 }
 
 /// A partial signature, should be aggregated with another partial signature under the same aggregated public key and message.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartialSignature(Scalar);
 
 impl PartialSignature {
@@ -388,7 +367,7 @@ impl PartialSignature {
 }
 
 /// The aggregated nonce of both parties, required for aggregating the signatures.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AggregatedNonce(EdwardsPoint);
 
 impl AggregatedNonce {

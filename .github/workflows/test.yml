@@ -23,7 +23,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --tests
+          args: --all-features --features=serde
 
   test:
     name: Test Suite
@@ -46,12 +46,13 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --all-features
 
       - name: Run signing example
         uses: actions-rs/cargo@v1
         with:
           command: run
-          args: --example signing
+          args: --all-features --example signing
 
 
   test-release:
@@ -76,13 +77,13 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --release
+          args: --release --all-features
 
       - name: Run signing example --release
         uses: actions-rs/cargo@v1
         with:
           command: run
-          args: --release --example signing
+          args: --all-features --release --example signing
 
 
   lints:
@@ -110,4 +111,4 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --tests -- -D warnings
+          args: --tests --all-features -- -D warnings
