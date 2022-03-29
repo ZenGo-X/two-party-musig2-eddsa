@@ -11,20 +11,16 @@ authors = [
 exclude = [".gitignore", ".github/"]
 
 [dependencies]
-curve25519-dalek = {version = "3"}
+curve25519-dalek = "3"
 rand = "0.8"
 sha2 = "0.9"
 serde = { version = "1.0", optional = true }
-blake2 = "0.10"
 
 [dev-dependencies]
 ed25519-dalek = "1.0.1"
 rand_xoshiro = "0.6.0"
 hex = "0.4.3"
 serde_test = "1"
-
-[build]
-rustdocflags = [ "--html-in-header", "docs_header.html" ]
 
 [package.metadata.docs.rs]
 rustdoc-args = [ "--html-in-header", "./docs_header.html", "--cfg", "docsrs" ]

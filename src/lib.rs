@@ -104,7 +104,6 @@ impl KeyPair {
             sig.0 += derived_data.0 * challenge;
         }
         (sig, nonce)
-
     }
 
     /// Create a partial ed25519 signature,
@@ -313,12 +312,16 @@ impl AggPublicKeyAndMusigCoeff {
 
     /// Derive a child public key
     pub fn derive_key(&self, path: &[u32]) -> (Self, DerivationData) {
-        let (delta, agg_public_key) = derive::derive_delta_and_public_key_from_path(&self.agg_public_key, path);
-        (Self {
-            agg_public_key,
-            musig_coefficient: self.musig_coefficient,
-            location: self.location,
-        }, DerivationData(delta))
+        let (delta, agg_public_key) =
+            derive::derive_delta_and_public_key_from_path(self.agg_public_key, path);
+        (
+            Self {
+                agg_public_key,
+                musig_coefficient: self.musig_coefficient,
+                location: self.location,
+            },
+            DerivationData(delta),
+        )
     }
 
     /// Returns the serialized aggregated public key.
@@ -490,7 +493,10 @@ fn edwards_from_bytes(bytes: &[u8]) -> Option<EdwardsPoint> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::{generate_partial_nonces_internal, AggPublicKeyAndMusigCoeff, KeyPair, Signature, DerivationData};
+    use crate::{
+        generate_partial_nonces_internal, AggPublicKeyAndMusigCoeff, DerivationData, KeyPair,
+        Signature,
+    };
     use curve25519_dalek::scalar::Scalar;
     use ed25519_dalek::Verifier;
     use hex::decode;
@@ -589,7 +595,6 @@ pub(crate) mod tests {
         }
     }
 
-
     #[test]
     fn test_two_party_signing() {
         let mut rng = deterministic_fast_rand("test_two_party_signing", None);
@@ -642,7 +647,10 @@ pub(crate) mod tests {
         }
 
         fn assert_correct_aggkeys(&self) {
-            assert_eq!(self.aggpubkey1.agg_public_key, self.aggpubkey2.agg_public_key);
+            assert_eq!(
+                self.aggpubkey1.agg_public_key,
+                self.aggpubkey2.agg_public_key
+            );
             // only one of them should be equal to 1.
             assert_ne!(
                 self.aggpubkey1.musig_coefficient == Scalar::one(),
@@ -678,7 +686,9 @@ pub(crate) mod tests {
             );
 
             let sign_function = |keypair, nonce, nonces, agg, msg| match &self.derivation_data {
-                Some(derivation_data) => KeyPair::partial_sign_derived(keypair, nonce, nonces, agg, msg, derivation_data),
+                Some(derivation_data) => {
+                    KeyPair::partial_sign_derived(keypair, nonce, nonces, agg, msg, derivation_data)
+                }
                 None => KeyPair::partial_sign(keypair, nonce, nonces, agg, msg),
             };
 

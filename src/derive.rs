@@ -1,5 +1,3 @@
-
-
 //! # Key derivation
 //! The `derive` module is intended to provide an HD-wallet functionality
 //! working in a [BIP-32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki)
@@ -76,82 +74,41 @@
 //! # Compatability
 //! Notice that no exact specification has been published for a standard HD key derivation for Ed25519.
 //! Therefore, the derived keys are not expected to be compatible with any other existing library on the internet.
-use blake2::{Blake2s256, Digest};
-use curve25519_dalek::constants::ED25519_BASEPOINT_POINT;
+use curve25519_dalek::constants::ED25519_BASEPOINT_TABLE;
 use curve25519_dalek::edwards::EdwardsPoint;
 use curve25519_dalek::scalar::Scalar;
+use sha2::{Digest, Sha512};
 
 fn compute_delta(p: &EdwardsPoint, i: u32) -> Scalar {
-    let mut hasher = Blake2s256::new();
+    let mut hasher = Sha512::new();
     hasher.update(p.compress().0);
     hasher.update(i.to_be_bytes());
-    let hash_bits: [u8; 32] = hasher.finalize().try_into().unwrap();
 
     // Despite BIP-32 parse_256 considers bytes as big endian.
     // Ed25519 considers scalars as little endian so we will
     // go with little endian here.
-    if hash_bits[0] & 240 == 0 {
-        Scalar::from_bits(hash_bits)
-    } else {
-        Scalar::from_bytes_mod_order(hash_bits)
-    }
+    Scalar::from_hash(hasher)
 }
 
 pub fn derive_delta_and_public_key_from_path(
-    pk: &EdwardsPoint,
+    pk: EdwardsPoint,
     path: &[u32],
 ) -> (Scalar, EdwardsPoint) {
     path.iter()
-        .fold((Scalar::zero(), *pk), |(delta_sum, pk_derived), &i| {
+        .fold((Scalar::zero(), pk), |(delta_sum, pk_derived), &i| {
             let delta = compute_delta(&pk_derived, i);
             (
                 delta_sum + delta,
-                pk_derived + delta * ED25519_BASEPOINT_POINT,
+                pk_derived + &delta * &ED25519_BASEPOINT_TABLE,
             )
         })
-}
-
-/// Computes the delta of a derivation path given a path `path` and a public key `pk`.
-///
-/// # Arguments
-///
-/// * `pk` - The public key from which to make the derivation.
-/// * `path` - The derivation path represented as a `u32` slice, each entry represents the next derivation level.
-///
-/// # Example
-/// ```compile_fail
-/// use two_party_musig2_eddsa::derive::derive_delta_path;
-/// use curve25519_dalek::constants::ED25519_BASEPOINT_POINT;
-/// use curve25519_dalek::scalar::Scalar;
-///
-/// let scalar_bytes = [1u8; 32];
-/// let sk: Scalar = Scalar::from_bytes_mod_order(scalar_bytes);
-/// let pk = sk * ED25519_BASEPOINT_POINT;
-/// let path = [1,2];
-/// let delta = derive_delta_path(&pk, &path);
-/// let derived_private_key = sk + delta;
-/// let derived_public_key = pk + delta * ED25519_BASEPOINT_POINT;
-///
-/// ```
-pub fn derive_delta_path(pk: &EdwardsPoint, path: &[u32]) -> Scalar {
-    derive_delta_and_public_key_from_path(pk, path).0
-}
-
-/// Derives a public key from an existing public key and a derivation path.
-///
-/// # Arguments
-///
-/// - `pk` - A public key.
-/// - `path` - The derivation path.
-pub fn derive_public_path(pk: &EdwardsPoint, path: &[u32]) -> EdwardsPoint {
-    derive_delta_and_public_key_from_path(pk, path).1
 }
 
 #[cfg(test)]
 mod tests {
 
-    use super::{derive_delta_path, derive_public_path};
-    use curve25519_dalek::{constants::ED25519_BASEPOINT_POINT, scalar::Scalar};
+    use super::derive_delta_and_public_key_from_path;
+    use curve25519_dalek::{constants::ED25519_BASEPOINT_TABLE, scalar::Scalar};
     use rand_xoshiro::{rand_core::RngCore, rand_core::SeedableRng, Xoshiro256PlusPlus};
     use std::assert_eq;
 
@@ -160,34 +117,39 @@ mod tests {
         rng.fill_bytes(&mut bytes);
         Scalar::from_bytes_mod_order(bytes)
     }
+
     #[test]
     fn test_public_and_delta_sanity_empty_path() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
         let sk = sample_scalar(&mut rng);
-        let pk = sk * ED25519_BASEPOINT_POINT;
-        assert_eq!(derive_delta_path(&pk, &[]), Scalar::zero());
-        assert_eq!(derive_public_path(&pk, &[]), pk);
+        let pk = &sk * &ED25519_BASEPOINT_TABLE;
+        assert_eq!(
+            derive_delta_and_public_key_from_path(pk, &[]).0,
+            Scalar::zero()
+        );
+        assert_eq!(derive_delta_and_public_key_from_path(pk, &[]).1, pk);
     }
+
     #[test]
     fn test_public_and_delta_sanity_path_length_one() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
         let sk = sample_scalar(&mut rng);
-        let pk = sk * ED25519_BASEPOINT_POINT;
+        let pk = &sk * &ED25519_BASEPOINT_TABLE;
         let path = [1];
-        let delta = derive_delta_path(&pk, &path);
-        let derived_pk = derive_public_path(&pk, &path);
+        let delta = derive_delta_and_public_key_from_path(pk, &path).0;
+        let derived_pk = derive_delta_and_public_key_from_path(pk, &path).1;
         assert_ne!(delta, Scalar::zero());
-        assert_eq!(derived_pk, pk + delta * ED25519_BASEPOINT_POINT);
+        assert_eq!(derived_pk, pk + &delta * &ED25519_BASEPOINT_TABLE);
     }
     #[test]
     fn test_public_and_delta_sanity_path_length_two() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
         let sk = sample_scalar(&mut rng);
-        let pk = sk * ED25519_BASEPOINT_POINT;
+        let pk = &sk * &ED25519_BASEPOINT_TABLE;
         let path = [1, u32::MAX];
-        let delta = derive_delta_path(&pk, &path);
-        let derived_pk = derive_public_path(&pk, &path);
+        let delta = derive_delta_and_public_key_from_path(pk, &path).0;
+        let derived_pk = derive_delta_and_public_key_from_path(pk, &path).1;
         assert_ne!(delta, Scalar::zero());
-        assert_eq!(derived_pk, pk + delta * ED25519_BASEPOINT_POINT);
+        assert_eq!(derived_pk, pk + &delta * &ED25519_BASEPOINT_TABLE);
     }
 }
