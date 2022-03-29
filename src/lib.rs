@@ -80,6 +80,33 @@ impl KeyPair {
         }
     }
 
+    /// Exactly like [`Self::partial_sign`] but for a derived key.
+    /// Create a partial ed25519 signature,
+    /// Combining this with the other party's partial signature will result in a valid ed25519 signature
+    pub fn partial_sign_derived(
+        &self,
+        private_partial_nonce: PrivatePartialNonces,
+        public_partial_nonce: [PublicPartialNonces; 2],
+        agg_public_key: &AggPublicKeyAndMusigCoeff,
+        message: &[u8],
+        derived_data: &DerivationData,
+    ) -> (PartialSignature, AggregatedNonce) {
+        let (mut sig, nonce) = self.partial_sign(
+            private_partial_nonce,
+            public_partial_nonce,
+            agg_public_key,
+            message,
+        );
+
+        // Only one party needs to adjust the signature, so we limit to just the "first" party in the ordered set.
+        if agg_public_key.location == KeySortedLocation::First {
+            let challenge = Signature::k(&nonce.0, &agg_public_key.agg_public_key, message);
+            sig.0 += derived_data.0 * challenge;
+        }
+        (sig, nonce)
+
+    }
+
     /// Create a partial ed25519 signature,
     /// Combining this with the other party's partial signature will result in a valid ed25519 signature
     pub fn partial_sign(
@@ -117,8 +144,7 @@ impl KeyPair {
         let sig_challenge = Signature::k(&effective_R, &agg_public_key.agg_public_key, message);
 
         let partial_signature =
-            sig_challenge * agg_public_key.musig_coefficient * self.private_key + effective_r;
-
+            effective_r + (agg_public_key.musig_coefficient * self.private_key * sig_challenge);
         (
             PartialSignature(partial_signature),
             AggregatedNonce(effective_R),
@@ -208,12 +234,35 @@ fn generate_partial_nonces_internal(
     (PrivatePartialNonces(r), PublicPartialNonces(R))
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum KeySortedLocation {
+    First = 0,
+    Second = 1,
+}
+
+impl TryFrom<u8> for KeySortedLocation {
+    type Error = ();
+    fn try_from(a: u8) -> Result<Self, Self::Error> {
+        match a {
+            a if a == Self::First as u8 => Ok(Self::First),
+            a if a == Self::Second as u8 => Ok(Self::Second),
+            _ => Err(()),
+        }
+    }
+}
+
 /// This is useful since when aggregating all public keys we also compute our musig coefficient.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AggPublicKeyAndMusigCoeff {
     agg_public_key: EdwardsPoint,
     musig_coefficient: Scalar,
+    location: KeySortedLocation,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// Data required to sign for the derived public key, this is generated when [`AggPublicKeyAndMusigCoeff::derive_key`] is called,
+/// and this needs to be passed to [`KeyPair::partial_sign_derived`] when signing
+pub struct DerivationData(Scalar);
 
 impl AggPublicKeyAndMusigCoeff {
     /// Aggregate public keys. This creates a combined public key that requires both parties in order to sign messages.
@@ -228,6 +277,11 @@ impl AggPublicKeyAndMusigCoeff {
         // By section B of the paper, we sort the public keys and set the musig coefficient for the second one as 1.
         let mut keys = [my_public_key, other_public_key];
         keys.sort_unstable();
+        let location = if keys[0] == my_public_key {
+            KeySortedLocation::First
+        } else {
+            KeySortedLocation::Second
+        };
 
         let edwards_keys = [
             edwards_from_bytes(&keys[0]).ok_or(Error::InvalidPublicKey)?,
@@ -244,7 +298,7 @@ impl AggPublicKeyAndMusigCoeff {
 
         let agg_public_key = first_musig_coefficient * edwards_keys[0] + edwards_keys[1];
 
-        let musig_coefficient = if keys[0] == my_public_key {
+        let musig_coefficient = if location == KeySortedLocation::First {
             first_musig_coefficient
         } else {
             Scalar::one()
@@ -253,7 +307,18 @@ impl AggPublicKeyAndMusigCoeff {
         Ok(Self {
             agg_public_key,
             musig_coefficient,
+            location,
         })
+    }
+
+    /// Derive a child public key
+    pub fn derive_key(&self, path: &[u32]) -> (Self, DerivationData) {
+        let (delta, agg_public_key) = derive::derive_delta_and_public_key_from_path(&self.agg_public_key, path);
+        (Self {
+            agg_public_key,
+            musig_coefficient: self.musig_coefficient,
+            location: self.location,
+        }, DerivationData(delta))
     }
 
     /// Returns the serialized aggregated public key.
@@ -262,18 +327,20 @@ impl AggPublicKeyAndMusigCoeff {
     }
 
     /// Serialize the aggregated public key and the musig coefficient for storage.
-    pub fn serialize(&self) -> [u8; 64] {
-        let mut output = [0u8; 64];
+    pub fn serialize(&self) -> [u8; 65] {
+        let mut output = [0u8; 65];
         output[..32].copy_from_slice(&self.agg_public_key.compress().0[..]);
         output[32..64].copy_from_slice(&self.musig_coefficient.as_bytes()[..]);
+        output[64] = self.location as u8;
         output
     }
 
     /// Deserialize from bytes as [agg_public_key, musig_coefficient].
-    pub fn deserialize(bytes: [u8; 64]) -> Option<Self> {
+    pub fn deserialize(bytes: [u8; 65]) -> Option<Self> {
         Some(Self {
             agg_public_key: edwards_from_bytes(&bytes[..32])?,
             musig_coefficient: scalar_from_bytes(&bytes[32..64])?,
+            location: bytes[64].try_into().ok()?,
         })
     }
 }
@@ -423,7 +490,7 @@ fn edwards_from_bytes(bytes: &[u8]) -> Option<EdwardsPoint> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::{generate_partial_nonces_internal, AggPublicKeyAndMusigCoeff, KeyPair, Signature};
+    use crate::{generate_partial_nonces_internal, AggPublicKeyAndMusigCoeff, KeyPair, Signature, DerivationData};
     use curve25519_dalek::scalar::Scalar;
     use ed25519_dalek::Verifier;
     use hex::decode;
@@ -501,87 +568,149 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn test_multiparty_signing_for_two_parties() {
-        let mut rng = deterministic_fast_rand("test_multiparty_signing_for_two_parties", None);
+    fn test_two_party_signing_with_derivation() {
+        let mut rng = deterministic_fast_rand("test_two_party_signing_with_derivation", None);
+
+        let mut msg = [0u8; 256];
+        let mut derivation = [0u32; 16];
+        for msg_len in 0..msg.len() {
+            let msg = &mut msg[..msg_len];
+            let derivation = &mut derivation[..(msg_len & 0b111)];
+            rng.fill(msg);
+            rng.fill(derivation);
+
+            let mut simulator = Musig2Simulator::gen_rand(&mut rng);
+            simulator.derive_key(derivation);
+            let sig = simulator.simulate_sign(msg, &mut rng);
+
+            sig.verify(msg, simulator.agg_pubkey()).unwrap();
+            // Verify result against dalek
+            assert!(verify_dalek(simulator.agg_pubkey(), sig.serialize(), msg));
+        }
+    }
+
+
+    #[test]
+    fn test_two_party_signing() {
+        let mut rng = deterministic_fast_rand("test_two_party_signing", None);
 
         let mut msg = [0u8; 256];
         for msg_len in 0..msg.len() {
             let msg = &mut msg[..msg_len];
             rng.fill_bytes(msg);
-            test_multiparty_signing_for_two_parties_internal(&mut rng, msg);
+            let simulator = Musig2Simulator::gen_rand(&mut rng);
+            let sig = simulator.simulate_sign(msg, &mut rng);
+
+            sig.verify(msg, simulator.agg_pubkey()).unwrap();
+            // Verify result against dalek
+            assert!(verify_dalek(simulator.agg_pubkey(), sig.serialize(), msg));
         }
     }
 
-    fn test_multiparty_signing_for_two_parties_internal(rng: &mut impl Rng, msg: &[u8]) {
-        // generate signing keys and partial nonces
-        let party0_key = KeyPair::create_from_private_key(rng.gen());
-        let party1_key = KeyPair::create_from_private_key(rng.gen());
+    struct Musig2Simulator {
+        keypair1: KeyPair,
+        keypair2: KeyPair,
+        aggpubkey1: AggPublicKeyAndMusigCoeff,
+        aggpubkey2: AggPublicKeyAndMusigCoeff,
+        derivation_data: Option<DerivationData>,
+    }
 
-        // randomly either pass `Some(msg)` or `None`.
-        let (p0_private_nonces, p0_public_nonces) =
-            generate_partial_nonces_internal(&party0_key, rng.gen::<bool>().then(|| msg), rng);
-        let (p1_private_nonces, p1_public_nonces) =
-            generate_partial_nonces_internal(&party1_key, rng.gen::<bool>().then(|| msg), rng);
+    impl Musig2Simulator {
+        fn gen_rand(rng: &mut impl Rng) -> Self {
+            let keypair1 = KeyPair::create_from_private_key(rng.gen());
+            let keypair2 = KeyPair::create_from_private_key(rng.gen());
+            let aggpubkey1 = AggPublicKeyAndMusigCoeff::aggregate_public_keys(
+                keypair1.pubkey(),
+                keypair2.pubkey(),
+            )
+            .unwrap();
+            let aggpubkey2 = AggPublicKeyAndMusigCoeff::aggregate_public_keys(
+                keypair2.pubkey(),
+                keypair1.pubkey(),
+            )
+            .unwrap();
 
-        // compute aggregated public key:
-        let party0_key_agg = AggPublicKeyAndMusigCoeff::aggregate_public_keys(
-            party0_key.pubkey(),
-            party1_key.pubkey(),
-        )
-        .unwrap();
-        let party1_key_agg = AggPublicKeyAndMusigCoeff::aggregate_public_keys(
-            party1_key.pubkey(),
-            party0_key.pubkey(),
-        )
-        .unwrap();
-        assert_eq!(party0_key_agg.agg_public_key, party1_key_agg.agg_public_key);
-        assert!(
-            party0_key_agg.musig_coefficient == Scalar::one()
-                || party1_key_agg.musig_coefficient == Scalar::one()
-        );
-        assert!(
-            party0_key_agg.musig_coefficient != Scalar::one()
-                || party1_key_agg.musig_coefficient != Scalar::one()
-        );
-        // Compute partial signatures
-        let (s0, aggregated_nonce0) = party0_key.partial_sign(
-            p0_private_nonces,
-            [p1_public_nonces.clone(), p0_public_nonces.clone()],
-            &party0_key_agg,
-            msg,
-        );
-        let (s1, aggregated_nonce1) = party1_key.partial_sign(
-            p1_private_nonces,
-            [p0_public_nonces, p1_public_nonces],
-            &party1_key_agg,
-            msg,
-        );
-        assert_eq!(aggregated_nonce0, aggregated_nonce1);
-        assert_eq!(aggregated_nonce0.serialize(), aggregated_nonce1.serialize());
+            let sim = Self {
+                keypair1,
+                keypair2,
+                aggpubkey1,
+                aggpubkey2,
+                derivation_data: None,
+            };
+            sim.assert_correct_aggkeys();
+            sim
+        }
 
-        let signature0 =
-            Signature::aggregate_partial_signatures(aggregated_nonce0, [s0.clone(), s1.clone()]);
-        let signature1 =
-            Signature::aggregate_partial_signatures(aggregated_nonce1, [s1.clone(), s0.clone()]);
-        assert_eq!(signature0, signature1);
-        assert_eq!(signature0.serialize(), signature1.serialize());
-        // debugging asserts
-        assert_eq!(s0.0 + s1.0, signature0.s, "signature aggregation failed!");
-        // verify:
-        assert!(
+        fn assert_correct_aggkeys(&self) {
+            assert_eq!(self.aggpubkey1.agg_public_key, self.aggpubkey2.agg_public_key);
+            // only one of them should be equal to 1.
+            assert_ne!(
+                self.aggpubkey1.musig_coefficient == Scalar::one(),
+                self.aggpubkey2.musig_coefficient == Scalar::one()
+            );
+        }
+
+        fn agg_pubkey(&self) -> [u8; 32] {
+            self.aggpubkey1.aggregated_pubkey()
+        }
+
+        fn derive_key(&mut self, path: &[u32]) {
+            let (aggpubkey1, derivation_data1) = self.aggpubkey1.derive_key(path);
+            let (aggpubkey2, derivation_data2) = self.aggpubkey2.derive_key(path);
+            self.aggpubkey1 = aggpubkey1;
+            self.aggpubkey2 = aggpubkey2;
+            assert_eq!(derivation_data1, derivation_data2);
+            self.derivation_data = Some(derivation_data1);
+            self.assert_correct_aggkeys();
+        }
+
+        fn simulate_sign(&self, msg: &[u8], rng: &mut impl Rng) -> Signature {
+            // randomly either pass `Some(msg)` or `None`.
+            let (private_nonces1, public_nonces1) = generate_partial_nonces_internal(
+                &self.keypair1,
+                rng.gen::<bool>().then(|| msg),
+                rng,
+            );
+            let (private_nonces2, public_nonces2) = generate_partial_nonces_internal(
+                &self.keypair2,
+                rng.gen::<bool>().then(|| msg),
+                rng,
+            );
+
+            let sign_function = |keypair, nonce, nonces, agg, msg| match &self.derivation_data {
+                Some(derivation_data) => KeyPair::partial_sign_derived(keypair, nonce, nonces, agg, msg, derivation_data),
+                None => KeyPair::partial_sign(keypair, nonce, nonces, agg, msg),
+            };
+
+            // Compute partial signatures
+            let (partial_sig1, aggregated_nonce1) = sign_function(
+                &self.keypair1,
+                private_nonces1,
+                [public_nonces1.clone(), public_nonces2.clone()],
+                &self.aggpubkey1,
+                msg,
+            );
+            let (partial_sig2, aggregated_nonce2) = sign_function(
+                &self.keypair2,
+                private_nonces2,
+                [public_nonces1, public_nonces2],
+                &self.aggpubkey2,
+                msg,
+            );
+            assert_eq!(aggregated_nonce1, aggregated_nonce2);
+            assert_eq!(aggregated_nonce1.serialize(), aggregated_nonce2.serialize());
+
+            let signature0 = Signature::aggregate_partial_signatures(
+                aggregated_nonce1,
+                [partial_sig1.clone(), partial_sig2.clone()],
+            );
+            let signature1 = Signature::aggregate_partial_signatures(
+                aggregated_nonce2,
+                [partial_sig2, partial_sig1],
+            );
+            assert_eq!(signature0, signature1);
+            assert_eq!(signature0.serialize(), signature1.serialize());
             signature0
-                .verify(msg, party0_key_agg.aggregated_pubkey())
-                .is_ok(),
-            "Verification failed!"
-        );
-        // Verify result against dalek
-        assert!(
-            verify_dalek(
-                party0_key_agg.aggregated_pubkey(),
-                signature0.serialize(),
-                msg
-            ),
-            "Dalek signature verification failed!"
-        );
+        }
     }
 }

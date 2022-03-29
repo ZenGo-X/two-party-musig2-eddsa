@@ -42,7 +42,7 @@ macro_rules! serialization {
 serialization!(
     {name: PrivatePartialNonces, len: 64, error: "Invalid private partial nonces"},
     {name: PublicPartialNonces, len: 64, error: "Invalid public partial nonces"},
-    {name: AggPublicKeyAndMusigCoeff, len: 64, error: "Invalid aggregated public key or musig coefficient"},
+    {name: AggPublicKeyAndMusigCoeff, len: 65, error: "Invalid aggregated public key or musig coefficient"},
     {name: Signature, len: 64, error: "Invalid signature"},
     {name: PartialSignature, len: 32, error: "Invalid partial signature"},
     {name: AggregatedNonce, len: 32, error: "Invalid aggregated nonce"},
@@ -176,13 +176,13 @@ mod tests {
 
     #[test]
     fn test_aggregated_pubkey() {
-        let mut serialized = [0u8; 64];
+        let mut serialized = [0u8; 65];
         serialized[..32].copy_from_slice(&ED25519_BASEPOINT);
         // leave the MSB off so it will be a valid scalar
         for (i, byte) in serialized[32..63].iter_mut().enumerate() {
             *byte = i as u8;
         }
-        test_max_u8_is_invalid::<AggPublicKeyAndMusigCoeff, _, 64>(
+        test_max_u8_is_invalid::<AggPublicKeyAndMusigCoeff, _, 65>(
             serialized,
             AggPublicKeyAndMusigCoeff::deserialize,
             "Invalid aggregated public key or musig coefficient",

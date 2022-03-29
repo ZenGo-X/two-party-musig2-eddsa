@@ -97,7 +97,7 @@ fn compute_delta(p: &EdwardsPoint, i: u32) -> Scalar {
     }
 }
 
-fn derive_delta_and_public_key_from_path(
+pub fn derive_delta_and_public_key_from_path(
     pk: &EdwardsPoint,
     path: &[u32],
 ) -> (Scalar, EdwardsPoint) {
@@ -119,8 +119,8 @@ fn derive_delta_and_public_key_from_path(
 /// * `path` - The derivation path represented as a `u32` slice, each entry represents the next derivation level.
 ///
 /// # Example
-/// ```
-/// use kms_edwards25519::derive_delta_path;
+/// ```compile_fail
+/// use two_party_musig2_eddsa::derive::derive_delta_path;
 /// use curve25519_dalek::constants::ED25519_BASEPOINT_POINT;
 /// use curve25519_dalek::scalar::Scalar;
 ///
@@ -150,7 +150,7 @@ pub fn derive_public_path(pk: &EdwardsPoint, path: &[u32]) -> EdwardsPoint {
 #[cfg(test)]
 mod tests {
 
-    use crate::{derive_delta_path, derive_public_path};
+    use super::{derive_delta_path, derive_public_path};
     use curve25519_dalek::{constants::ED25519_BASEPOINT_POINT, scalar::Scalar};
     use rand_xoshiro::{rand_core::RngCore, rand_core::SeedableRng, Xoshiro256PlusPlus};
     use std::assert_eq;
