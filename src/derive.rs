@@ -1,5 +1,7 @@
-//! # KMS-Edwards25519
-//! The `kms-edwards25519` crate is intended to provide an HD-wallet functionality
+
+
+//! # Key derivation
+//! The `derive` module is intended to provide an HD-wallet functionality
 //! working in a [BIP-32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki)
 //! like fashion for [Ed25519](https://datatracker.ietf.org/doc/html/rfc8032) keys.
 //!

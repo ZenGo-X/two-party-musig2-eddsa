@@ -14,6 +14,8 @@
 #![warn(missing_docs, unsafe_code, future_incompatible)]
 mod serde;
 
+mod derive;
+
 use core::fmt;
 
 use curve25519_dalek::constants;
