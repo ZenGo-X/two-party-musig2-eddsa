@@ -23,7 +23,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --all-features --features=serde
+          args: --all-features
 
   test:
     name: Test Suite
@@ -111,4 +111,4 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --tests --all-features -- -D warnings
+          args: --examples --tests --all-features -- -D warnings

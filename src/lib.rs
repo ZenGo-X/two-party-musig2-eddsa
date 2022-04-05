@@ -612,6 +612,24 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn test_invalid_sig() {
+        let mut rng = deterministic_fast_rand("test_invalid_sig", None);
+        let msg: [u8; 32] = rng.gen();
+        let simulator = Musig2Simulator::gen_rand(&mut rng);
+        let mut sig = simulator.simulate_sign(&msg, &mut rng);
+        sig.s += Scalar::from(1u32);
+        sig.verify(&msg, simulator.agg_pubkey()).unwrap_err();
+    }
+
+    #[test]
+    fn test_equal_pubkeys() {
+        let mut rng = deterministic_fast_rand("test_equal_pubkeys", None);
+        let keypair = KeyPair::create_from_private_key(rng.gen());
+        let pubkey = keypair.pubkey();
+        AggPublicKeyAndMusigCoeff::aggregate_public_keys(pubkey, pubkey).unwrap_err();
+    }
+
     struct Musig2Simulator {
         keypair1: KeyPair,
         keypair2: KeyPair,

@@ -95,3 +95,8 @@ impl ReceiveArray for Receiver<Vec<u8>> {
         self.recv().unwrap().try_into()
     }
 }
+
+#[test]
+fn test_main() {
+    main()
+}
