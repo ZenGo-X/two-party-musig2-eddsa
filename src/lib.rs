@@ -488,7 +488,7 @@ fn edwards_from_bytes(bytes: &[u8]) -> Option<EdwardsPoint> {
     // We require that the point will be 0 in the small subgroup,
     // `is_small_order()` checks if the point is *only* in the small subgroup,
     // while `is_torsion_free()` makes sure the point is 0 in the small subgroup.
-    point.is_torsion_free().then(|| point)
+    point.is_torsion_free().then_some(point)
 }
 
 #[cfg(test)]
@@ -694,12 +694,12 @@ pub(crate) mod tests {
             // randomly either pass `Some(msg)` or `None`.
             let (private_nonces1, public_nonces1) = generate_partial_nonces_internal(
                 &self.keypair1,
-                rng.gen::<bool>().then(|| msg),
+                rng.gen::<bool>().then_some(msg),
                 rng,
             );
             let (private_nonces2, public_nonces2) = generate_partial_nonces_internal(
                 &self.keypair2,
-                rng.gen::<bool>().then(|| msg),
+                rng.gen::<bool>().then_some(msg),
                 rng,
             );
 
