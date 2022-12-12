@@ -63,6 +63,7 @@ serialization!(
 struct ArrayVisitor<const N: usize> {
     purpose: &'static str,
 }
+
 impl<'de, const N: usize> Visitor<'de> for ArrayVisitor<N> {
     type Value = [u8; N];
 
@@ -93,10 +94,7 @@ mod tests {
     use crate::privatepartialnonces::PrivatePartialNonces;
     use crate::publicpartialnonces::PublicPartialNonces;
     use crate::signature::Signature;
-    use crate::{
-        AggPublicKeyAndMusigCoeff, AggregatedNonce, PartialSignature, PrivatePartialNonces,
-        PublicPartialNonces, Signature,
-    };
+
     use serde::{de::DeserializeOwned, Serialize};
     use serde_test::{assert_de_tokens_error, assert_tokens, Token};
     use std::{any::Any, fmt::Debug};
