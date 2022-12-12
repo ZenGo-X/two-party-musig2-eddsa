@@ -1,4 +1,6 @@
 #![cfg(feature = "serde")]
+
+use std::fmt;
 /// Here we implement serde serialization and deserialization in terms of the `serialize`/`deserialize` functions
 /// This will promise us stable platform independent serialization that shouldn't break by modifying types
 /// It will also make sure that everything passes the right validations (torsion free etc.)
@@ -7,7 +9,19 @@ use serde::{
     ser::SerializeTuple,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::fmt;
+
+use crate::privatepartialnonces::PrivatePartialNonces;
+use crate::publicpartialnonces::PublicPartialNonces;
+use crate::aggregate::AggPublicKeyAndMusigCoeff;
+use crate::signature::Signature;
+use crate::partialsig::PartialSignature;
+use crate::aggregate::AggregatedNonce;
+use super::privatepartialnonces;
+use crate::common;
+
+use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
+use std::fmt::{Display, Formatter};
+
 
 macro_rules! serialization {
     ($({name: $name:ident, len: $len:expr, error: $error:expr}),+ $(,)?) => {
