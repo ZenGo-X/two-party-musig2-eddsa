@@ -1,3 +1,4 @@
+//!    Module for public nonces
 use crate::common::edwards_from_bytes;
 use curve25519_dalek::edwards::EdwardsPoint;
 

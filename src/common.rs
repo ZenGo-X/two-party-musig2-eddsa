@@ -1,3 +1,5 @@
+//!    Crate handling common functionality for all modules in the crate
+
 use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 use curve25519_dalek::scalar::Scalar;
 use std::convert::TryInto;

@@ -1,3 +1,5 @@
+//!    Module handling signature objects for musig2 computation
+
 use crate::aggregate::AggregatedNonce;
 use crate::common::{edwards_from_bytes, scalar_from_bytes};
 use crate::partialsig::PartialSignature;

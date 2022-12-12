@@ -1,3 +1,4 @@
+//!    Module handling aggregation functionality for the musig2 computation
 use crate::common::{edwards_from_bytes, scalar_from_bytes, KeySortedLocation};
 use crate::{derive, Error};
 use curve25519_dalek::edwards::EdwardsPoint;

@@ -1,3 +1,5 @@
+//!    Module handling the public,secret keypair for musis2
+
 use super::partialsig::*;
 use crate::aggregate::{AggPublicKeyAndMusigCoeff, AggregatedNonce, DerivationData};
 use crate::common::*;
