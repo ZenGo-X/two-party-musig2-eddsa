@@ -2,10 +2,7 @@
 /// Here we implement serde serialization and deserialization in terms of the `serialize`/`deserialize` functions
 /// This will promise us stable platform independent serialization that shouldn't break by modifying types
 /// It will also make sure that everything passes the right validations (torsion free etc.)
-use crate::{
-    AggPublicKeyAndMusigCoeff, AggregatedNonce, PartialSignature, PrivatePartialNonces,
-    PublicPartialNonces, Signature,
-};
+
 use serde::{
     de::{Error, SeqAccess, Visitor},
     ser::SerializeTuple,
@@ -86,6 +83,11 @@ mod tests {
     use serde::{de::DeserializeOwned, Serialize};
     use serde_test::{assert_de_tokens_error, assert_tokens, Token};
     use std::{any::Any, fmt::Debug};
+    use crate::aggregate::{AggPublicKeyAndMusigCoeff, AggregatedNonce};
+    use crate::partialsig::PartialSignature;
+    use crate::privatepartialnonces::PrivatePartialNonces;
+    use crate::publicpartialnonces::PublicPartialNonces;
+    use crate::signature::Signature;
 
     const ED25519_BASEPOINT: [u8; 32] = [
         88, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102,
