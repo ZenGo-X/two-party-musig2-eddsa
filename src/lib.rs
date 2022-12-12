@@ -12,9 +12,12 @@
 
 #![allow(non_snake_case)]
 #![warn(missing_docs, unsafe_code, future_incompatible)]
+
 mod derive;
 mod serde;
+
 use core::fmt;
+
 pub mod aggregate;
 pub mod common;
 pub mod keypair;
@@ -136,7 +139,7 @@ mod tests {
 
             let mut simulator = Musig2Simulator::gen_rand(&mut rng);
             simulator.derive_key(derivation);
-            let sig = simulator.simulate_sign(msg, &mut rng);
+            let sig = simulator.simulate_sign(msg);
 
             sig.verify(msg, simulator.agg_pubkey()).unwrap();
             // Verify result against dalek
@@ -153,7 +156,7 @@ mod tests {
             let msg = &mut msg[..msg_len];
             rng.fill_bytes(msg);
             let simulator = Musig2Simulator::gen_rand(&mut rng);
-            let sig = simulator.simulate_sign(msg, &mut rng);
+            let sig = simulator.simulate_sign(msg);
 
             sig.verify(msg, simulator.agg_pubkey()).unwrap();
             // Verify result against dalek
@@ -166,7 +169,7 @@ mod tests {
         let mut rng = deterministic_fast_rand("test_invalid_sig", None);
         let msg: [u8; 32] = rng.gen();
         let simulator = Musig2Simulator::gen_rand(&mut rng);
-        let mut sig = simulator.simulate_sign(&msg, &mut rng);
+        let mut sig = simulator.simulate_sign(&msg);
         sig.s += Scalar::from(1u32);
         sig.verify(&msg, simulator.agg_pubkey()).unwrap_err();
     }
@@ -239,7 +242,7 @@ mod tests {
             self.assert_correct_aggkeys();
         }
 
-        fn simulate_sign(&self, msg: &[u8], rng: &mut impl Rng) -> Signature {
+        fn simulate_sign(&self, msg: &[u8]) -> Signature {
             // randomly either pass `Some(msg)` or `None`.
             let (private_nonces1, public_nonces1) =
                 self.keypair1.generate_partial_nonces(Some(msg));

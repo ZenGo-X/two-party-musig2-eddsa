@@ -1,5 +1,6 @@
 use crate::common::edwards_from_bytes;
-use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
+use curve25519_dalek::edwards::EdwardsPoint;
+
 /// Public partial nonces, they should be transmitted to the other party in order to generate the aggregated nonce.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicPartialNonces(pub(crate) [EdwardsPoint; 2]);

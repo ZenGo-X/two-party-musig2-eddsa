@@ -1,6 +1,6 @@
 use crate::common::{edwards_from_bytes, scalar_from_bytes, KeySortedLocation};
 use crate::{derive, Error};
-use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
+use curve25519_dalek::edwards::EdwardsPoint;
 use curve25519_dalek::scalar::Scalar;
 use sha2::{Digest, Sha512};
 use std::convert::TryInto;

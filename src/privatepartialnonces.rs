@@ -1,4 +1,3 @@
-use crate::common;
 use crate::common::scalar_from_bytes;
 use curve25519_dalek::scalar::Scalar;
 

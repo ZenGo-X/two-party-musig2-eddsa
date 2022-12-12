@@ -1,12 +1,11 @@
 use super::partialsig::*;
-use super::privatepartialnonces;
 use crate::aggregate::{AggPublicKeyAndMusigCoeff, AggregatedNonce, DerivationData};
 use crate::common::*;
 use crate::privatepartialnonces::PrivatePartialNonces;
 use crate::publicpartialnonces::PublicPartialNonces;
 use crate::signature::Signature;
 use curve25519_dalek::constants;
-use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
+use curve25519_dalek::edwards::EdwardsPoint;
 use curve25519_dalek::scalar::Scalar;
 use rand::{thread_rng, Rng};
 use sha2::{Digest, Sha512};
@@ -135,9 +134,9 @@ impl KeyPair {
             Scalar::from_hash(
                 Sha512::new()
                     .chain("musig2 private nonce generation")
-                    .chain(&self.prefix)
+                    .chain(self.prefix)
                     .chain(message.unwrap_or(&[]))
-                    .chain(&mut thread_rng().gen::<[u8; 32]>()),
+                    .chain(thread_rng().gen::<[u8; 32]>()),
             )
         });
         let R: [EdwardsPoint; 2] = r.map(|scalar| &scalar * &constants::ED25519_BASEPOINT_TABLE);
