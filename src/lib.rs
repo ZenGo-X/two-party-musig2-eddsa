@@ -12,16 +12,16 @@
 
 #![allow(non_snake_case)]
 #![warn(missing_docs, unsafe_code, future_incompatible)]
-mod serde;
 mod derive;
+mod serde;
 use core::fmt;
-pub mod privatepartialnonces;
-pub mod partialsig;
-pub mod keypair;
-pub mod publicpartialnonces;
-pub mod common;
-pub mod signature;
 pub mod aggregate;
+pub mod common;
+pub mod keypair;
+pub mod partialsig;
+pub mod privatepartialnonces;
+pub mod publicpartialnonces;
+pub mod signature;
 
 /// Errors that may occur while processing signatures and keys
 #[derive(Debug)]
@@ -43,15 +43,15 @@ impl fmt::Display for Error {
 
 #[cfg(test)]
 mod tests {
+    use crate::aggregate::{AggPublicKeyAndMusigCoeff, DerivationData};
+    use crate::keypair::KeyPair;
+    use crate::signature::Signature;
     use curve25519_dalek::scalar::Scalar;
     use ed25519_dalek::Verifier;
     use hex::decode;
     use rand::{thread_rng, Rng};
     use rand_xoshiro::rand_core::{RngCore, SeedableRng};
     use rand_xoshiro::Xoshiro256PlusPlus;
-    use crate::aggregate::{AggPublicKeyAndMusigCoeff, DerivationData};
-    use crate::keypair::KeyPair;
-    use crate::signature::Signature;
 
     /// This will generate a fast deterministic rng and will print the seed,
     /// if a test fails, pass in the printed seed to reproduce.
@@ -195,12 +195,12 @@ mod tests {
                 keypair1.pubkey(),
                 keypair2.pubkey(),
             )
-                .unwrap();
+            .unwrap();
             let aggpubkey2 = AggPublicKeyAndMusigCoeff::aggregate_public_keys(
                 keypair2.pubkey(),
                 keypair1.pubkey(),
             )
-                .unwrap();
+            .unwrap();
 
             let sim = Self {
                 keypair1,
@@ -241,9 +241,11 @@ mod tests {
 
         fn simulate_sign(&self, msg: &[u8], rng: &mut impl Rng) -> Signature {
             // randomly either pass `Some(msg)` or `None`.
-            let (private_nonces1, public_nonces1) = self.keypair1.generate_partial_nonces(Some(msg));
+            let (private_nonces1, public_nonces1) =
+                self.keypair1.generate_partial_nonces(Some(msg));
 
-            let (private_nonces2, public_nonces2) = self.keypair1.generate_partial_nonces(Some(msg));
+            let (private_nonces2, public_nonces2) =
+                self.keypair1.generate_partial_nonces(Some(msg));
 
             let sign_function = |keypair, nonce, nonces, agg, msg| match &self.derivation_data {
                 Some(derivation_data) => {
@@ -284,5 +286,3 @@ mod tests {
         }
     }
 }
-
-

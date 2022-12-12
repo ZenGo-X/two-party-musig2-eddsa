@@ -1,15 +1,15 @@
-use curve25519_dalek::constants;
-use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
-use curve25519_dalek::scalar::Scalar;
-use rand::{Rng, thread_rng};
-use sha2::{Digest, Sha512};
+use super::partialsig::*;
+use super::privatepartialnonces;
 use crate::aggregate::{AggPublicKeyAndMusigCoeff, AggregatedNonce, DerivationData};
+use crate::common::*;
 use crate::privatepartialnonces::PrivatePartialNonces;
 use crate::publicpartialnonces::PublicPartialNonces;
 use crate::signature::Signature;
-use super::privatepartialnonces;
-use super::partialsig::*;
-use crate::common::*;
+use curve25519_dalek::constants;
+use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
+use curve25519_dalek::scalar::Scalar;
+use rand::{thread_rng, Rng};
+use sha2::{Digest, Sha512};
 
 /// An ed25519 keypair
 pub struct KeyPair {
@@ -124,8 +124,9 @@ impl KeyPair {
         self.public_key.compress().0
     }
     /// Generate partial nonces, make sure to call this again for every signing session.
-    pub fn generate_partial_nonces(&self,
-                                   message: Option<&[u8]>,
+    pub fn generate_partial_nonces(
+        &self,
+        message: Option<&[u8]>,
     ) -> (PrivatePartialNonces, PublicPartialNonces) {
         // generate_partial_nonces_internal(keys, message, &mut thread_rng())
         // here we deviate from the spec, by introducing  non-deterministic element (random number)

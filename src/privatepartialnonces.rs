@@ -1,6 +1,6 @@
-use curve25519_dalek::scalar::Scalar;
-use crate::common::scalar_from_bytes;
 use crate::common;
+use crate::common::scalar_from_bytes;
+use curve25519_dalek::scalar::Scalar;
 
 #[derive(Debug, PartialEq, Eq)]
 /// Private Partial Nonces, they should be kept until partially signing a message and then they should be discarded.

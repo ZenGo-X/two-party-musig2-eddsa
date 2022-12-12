@@ -1,9 +1,9 @@
-use std::convert::TryInto;
+use crate::common::{edwards_from_bytes, scalar_from_bytes, KeySortedLocation};
+use crate::{derive, Error};
 use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 use curve25519_dalek::scalar::Scalar;
 use sha2::{Digest, Sha512};
-use crate::{derive, Error};
-use crate::common::{edwards_from_bytes, KeySortedLocation, scalar_from_bytes};
+use std::convert::TryInto;
 
 impl std::error::Error for Error {}
 
@@ -104,8 +104,6 @@ impl AggPublicKeyAndMusigCoeff {
         })
     }
 }
-
-
 
 /// The aggregated nonce of both parties, required for aggregating the signatures.
 #[derive(Debug, Clone, PartialEq, Eq)]

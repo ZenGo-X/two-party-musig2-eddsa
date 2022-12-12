@@ -1,12 +1,12 @@
-use core::fmt;
-use std::fmt::{Display, Formatter};
-use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
-use curve25519_dalek::scalar::Scalar;
-use crate::partialsig::PartialSignature;
-use curve25519_dalek::constants;
-use sha2::{Digest, Sha512};
 use crate::aggregate::AggregatedNonce;
 use crate::common::{edwards_from_bytes, scalar_from_bytes};
+use crate::partialsig::PartialSignature;
+use core::fmt;
+use curve25519_dalek::constants;
+use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
+use curve25519_dalek::scalar::Scalar;
+use sha2::{Digest, Sha512};
+use std::fmt::{Display, Formatter};
 
 /// An Ed25519 signature.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,5 +80,4 @@ impl Signature {
             s: scalar_from_bytes(&bytes[32..64])?,
         })
     }
-
 }

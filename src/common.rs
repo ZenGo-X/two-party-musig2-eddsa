@@ -1,8 +1,6 @@
-use std::convert::TryInto;
 use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 use curve25519_dalek::scalar::Scalar;
-
-
+use std::convert::TryInto;
 
 /// Converts 32 bytes into an edwards point.
 /// Checks both that the Y coordinate is on the curve, and that the resulting point is torsion free.
@@ -17,8 +15,6 @@ pub fn edwards_from_bytes(bytes: &[u8]) -> Option<EdwardsPoint> {
     // while `is_torsion_free()` makes sure the point is 0 in the small subgroup.
     point.is_torsion_free().then_some(point)
 }
-
-
 
 /// Converts 32 bytes into a Scalar, checking that the scalar is fully reduced.
 ///

@@ -6,7 +6,6 @@ use two_party_musig2_eddsa::partialsig::PartialSignature;
 use two_party_musig2_eddsa::publicpartialnonces::PublicPartialNonces;
 use two_party_musig2_eddsa::signature::Signature;
 
-
 const MESSAGE: &[u8] = b"Message To Be signed";
 
 fn launch_party(
