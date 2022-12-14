@@ -1,9 +1,10 @@
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
-use two_party_musig2_eddsa::{
-    generate_partial_nonces, AggPublicKeyAndMusigCoeff, KeyPair, PartialSignature,
-    PublicPartialNonces, Signature,
-};
+use two_party_musig2_eddsa::aggregate::AggPublicKeyAndMusigCoeff;
+use two_party_musig2_eddsa::keypair::KeyPair;
+use two_party_musig2_eddsa::partialsig::PartialSignature;
+use two_party_musig2_eddsa::publicpartialnonces::PublicPartialNonces;
+use two_party_musig2_eddsa::signature::Signature;
 
 const MESSAGE: &[u8] = b"Message To Be signed";
 
@@ -28,7 +29,7 @@ fn launch_party(
 
     // Generate nonces.
     // Note that the message is optional, so this can be done before you know what you're signing on.
-    let (private_nonces, public_nonces) = generate_partial_nonces(&keypair, Some(MESSAGE));
+    let (private_nonces, public_nonces) = keypair.generate_partial_nonces(Some(MESSAGE));
 
     // Send your public nonces to the counterparty.
     sender.send(public_nonces.serialize().to_vec()).unwrap();

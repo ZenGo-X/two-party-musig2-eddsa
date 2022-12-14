@@ -1,17 +1,21 @@
 #![cfg(feature = "serde")]
+
 /// Here we implement serde serialization and deserialization in terms of the `serialize`/`deserialize` functions
 /// This will promise us stable platform independent serialization that shouldn't break by modifying types
 /// It will also make sure that everything passes the right validations (torsion free etc.)
-use crate::{
-    AggPublicKeyAndMusigCoeff, AggregatedNonce, PartialSignature, PrivatePartialNonces,
-    PublicPartialNonces, Signature,
-};
 use serde::{
     de::{Error, SeqAccess, Visitor},
     ser::SerializeTuple,
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::fmt;
+
+use crate::aggregate::AggPublicKeyAndMusigCoeff;
+use crate::aggregate::AggregatedNonce;
+use crate::partialsig::PartialSignature;
+use crate::privatepartialnonces::PrivatePartialNonces;
+use crate::publicpartialnonces::PublicPartialNonces;
+use crate::signature::Signature;
 
 macro_rules! serialization {
     ($({name: $name:ident, len: $len:expr, error: $error:expr}),+ $(,)?) => {
@@ -54,6 +58,7 @@ serialization!(
 struct ArrayVisitor<const N: usize> {
     purpose: &'static str,
 }
+
 impl<'de, const N: usize> Visitor<'de> for ArrayVisitor<N> {
     type Value = [u8; N];
 
@@ -79,10 +84,12 @@ impl<'de, const N: usize> Visitor<'de> for ArrayVisitor<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        AggPublicKeyAndMusigCoeff, AggregatedNonce, PartialSignature, PrivatePartialNonces,
-        PublicPartialNonces, Signature,
-    };
+    use crate::aggregate::{AggPublicKeyAndMusigCoeff, AggregatedNonce};
+    use crate::partialsig::PartialSignature;
+    use crate::privatepartialnonces::PrivatePartialNonces;
+    use crate::publicpartialnonces::PublicPartialNonces;
+    use crate::signature::Signature;
+
     use serde::{de::DeserializeOwned, Serialize};
     use serde_test::{assert_de_tokens_error, assert_tokens, Token};
     use std::{any::Any, fmt::Debug};
