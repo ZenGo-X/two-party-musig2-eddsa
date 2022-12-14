@@ -13,7 +13,6 @@ use rand::{thread_rng, Rng};
 use sha2::{Digest, Sha512};
 use zeroize::Zeroize;
 
-
 /// An ed25519 keypair
 pub struct KeyPair {
     public_key: EdwardsPoint,

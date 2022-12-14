@@ -38,7 +38,6 @@ impl zeroize::Zeroize for PrivatePartialNonces {
     }
 }
 
-
 impl Drop for PrivatePartialNonces {
     fn drop(&mut self) {
         self.0.zeroize();
