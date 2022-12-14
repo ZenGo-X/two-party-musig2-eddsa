@@ -15,6 +15,7 @@ curve25519-dalek = "3"
 rand = "0.8"
 sha2 = "0.9"
 serde = { version = "1.0", optional = true }
+zeroize = "1.5.7"
 
 [dev-dependencies]
 ed25519-dalek = "1.0.1"

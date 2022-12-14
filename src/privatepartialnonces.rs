@@ -1,7 +1,7 @@
 //!    Module for private nonces
 use crate::common::scalar_from_bytes;
 use curve25519_dalek::scalar::Scalar;
-use crate::keypair::KeyPair;
+use zeroize::Zeroize;
 
 #[derive(Debug, PartialEq, Eq)]
 /// Private Partial Nonces, they should be kept until partially signing a message and then they should be discarded.
@@ -29,6 +29,7 @@ impl PrivatePartialNonces {
         ]))
     }
 }
+
 impl zeroize::ZeroizeOnDrop for PrivatePartialNonces {}
 
 impl zeroize::Zeroize for PrivatePartialNonces {
@@ -37,9 +38,8 @@ impl zeroize::Zeroize for PrivatePartialNonces {
     }
 }
 
-impl zeroize::ZeroizeOnDrop for PrivatePartialNonces {}
 
-impl Drop for KeyPair {
+impl Drop for PrivatePartialNonces {
     fn drop(&mut self) {
         self.0.zeroize();
     }
