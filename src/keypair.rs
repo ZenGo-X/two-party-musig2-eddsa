@@ -11,6 +11,7 @@ use curve25519_dalek::edwards::EdwardsPoint;
 use curve25519_dalek::scalar::Scalar;
 use rand::{thread_rng, Rng};
 use sha2::{Digest, Sha512};
+use zeroize::Zeroize;
 
 /// An ed25519 keypair
 pub struct KeyPair {
@@ -143,5 +144,19 @@ impl KeyPair {
         });
         let R: [EdwardsPoint; 2] = r.map(|scalar| &scalar * &constants::ED25519_BASEPOINT_TABLE);
         (PrivatePartialNonces(r), PublicPartialNonces(R))
+    }
+}
+
+impl zeroize::ZeroizeOnDrop for KeyPair {}
+
+impl zeroize::Zeroize for KeyPair {
+    fn zeroize(&mut self) {
+        self.private_key.zeroize()
+    }
+}
+
+impl Drop for KeyPair {
+    fn drop(&mut self) {
+        self.private_key.zeroize();
     }
 }
