@@ -145,3 +145,18 @@ impl KeyPair {
         (PrivatePartialNonces(r), PublicPartialNonces(R))
     }
 }
+impl zeroize::ZeroizeOnDrop for KeyPair {}
+
+impl zeroize::Zeroize for KeyPair {
+    fn zeroize(&mut self) {
+        self.private_key.zeroize()
+    }
+}
+
+impl zeroize::ZeroizeOnDrop for KeyPair {}
+
+impl Drop for KeyPair {
+    fn drop(&mut self) {
+        self.private_key.zeroize();
+    }
+}
